@@ -320,10 +320,10 @@ else:
             st.markdown(f"#### Active Dockets & Evidence Registered under {st.session_state.nav_station}")
             
             if station_cases:
-                for sc in station_cases:
+                for idx, sc in enumerate(station_cases):
                     col_sc1, col_sc2 = st.columns([4, 1])
                     col_sc1.markdown(f"**Case No:** `{sc['Case No']}` | **Title:** {sc['Title']} | **IO:** {sc['IO']} | **Status:** {sc['Status']}")
-                    if col_sc1.button(f"📂 Open Case Workspace", key=f"open_case_{sc['Case No']}"):
+                    if col_sc1.button(f"📂 Open Case Workspace", key=f"open_case_{sc['Case No']}_{idx}"):
                         st.session_state.selected_case = sc['Case No']
                         st.rerun()
                     col_sc1.markdown("---")
@@ -348,42 +348,46 @@ else:
                 uploaded_file = st.file_uploader("Upload Evidence Exhibit File (Image: jpg/png, Video: mp4/mov, Document: txt/pdf)", type=["jpg", "jpeg", "png", "mp4", "mov", "avi", "txt", "pdf"])
 
                 if submitted:
-                    ex_filename = f"{st.session_state.nav_station.replace(' ', '_')}_{new_cno.replace('/', '_')}.nyayavault"
-                    save_path = os.path.join(VAULT_STORAGE_DIR, ex_filename)
-                    
-                    file_type = "text"
-                    raw_bytes = new_desc.encode()
+                    current_cases = st.session_state.cases_db.get(st.session_state.nav_station, [])
+                    if any(c["Case No"] == new_cno for c in current_cases):
+                        st.error(f"Case number '{new_cno}' already exists in this station vault. Please provide a unique case identifier.")
+                    else:
+                        ex_filename = f"{st.session_state.nav_station.replace(' ', '_')}_{new_cno.replace('/', '_')}.nyayavault"
+                        save_path = os.path.join(VAULT_STORAGE_DIR, ex_filename)
+                        
+                        file_type = "text"
+                        raw_bytes = new_desc.encode()
 
-                    if uploaded_file is not None:
-                        raw_bytes = uploaded_file.read()
-                        fname_lower = uploaded_file.name.lower()
-                        if any(fname_lower.endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".bmp"]):
-                            file_type = "image"
-                        elif any(fname_lower.endswith(ext) for ext in [".mp4", ".mov", ".avi", ".mkv"]):
-                            file_type = "video"
+                        if uploaded_file is not None:
+                            raw_bytes = uploaded_file.read()
+                            fname_lower = uploaded_file.name.lower()
+                            if any(fname_lower.endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".bmp"]):
+                                file_type = "image"
+                            elif any(fname_lower.endswith(ext) for ext in [".mp4", ".mov", ".avi", ".mkv"]):
+                                file_type = "video"
 
-                    cipher = EncryptionEngine.get_cipher()
-                    encrypted_data = cipher.encrypt(raw_bytes)
-                    with open(save_path, "wb") as sf:
-                        sf.write(encrypted_data)
-                    
-                    new_entry = {
-                        "Case No": new_cno, 
-                        "Title": new_title, 
-                        "FIR": new_fir, 
-                        "Status": "Under Investigation", 
-                        "IO": new_io, 
-                        "Victim": new_victim, 
-                        "Scene": st.session_state.nav_area, 
-                        "Evidence File": ex_filename, 
-                        "File Type": file_type,
-                        "Details": new_desc
-                    }
-                    if st.session_state.nav_station not in st.session_state.cases_db:
-                        st.session_state.cases_db[st.session_state.nav_station] = []
-                    st.session_state.cases_db[st.session_state.nav_station].append(new_entry)
-                    st.success("Case and encrypted evidence successfully committed to station vault!")
-                    st.rerun()
+                        cipher = EncryptionEngine.get_cipher()
+                        encrypted_data = cipher.encrypt(raw_bytes)
+                        with open(save_path, "wb") as sf:
+                            sf.write(encrypted_data)
+                        
+                        new_entry = {
+                            "Case No": new_cno, 
+                            "Title": new_title, 
+                            "FIR": new_fir, 
+                            "Status": "Under Investigation", 
+                            "IO": new_io, 
+                            "Victim": new_victim, 
+                            "Scene": st.session_state.nav_area, 
+                            "Evidence File": ex_filename, 
+                            "File Type": file_type,
+                            "Details": new_desc
+                        }
+                        if st.session_state.nav_station not in st.session_state.cases_db:
+                            st.session_state.cases_db[st.session_state.nav_station] = []
+                        st.session_state.cases_db[st.session_state.nav_station].append(new_entry)
+                        st.success("Case and encrypted evidence successfully committed to station vault!")
+                        st.rerun()
 
         # AREA / STATION SELECTION LEVEL
         elif st.session_state.nav_area:
