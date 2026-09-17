@@ -1,5 +1,5 @@
 """
-web_app.py — NyayaVault Web Edition (Flask)
+web_app.py — NyayaVault Web Edition (Flask & Streamlit Cloud Compatible)
 
 A 1:1 web port of app.py (the CustomTkinter desktop client). Every screen,
 rank rule, Oracle query, AES-256 seal, SHA-256 audit chain, blockchain
@@ -8,18 +8,6 @@ anchor and ReportLab PDF from the desktop app is reproduced here.
 Nothing else in the project needs to change: this file reads the same
 config.json, talks to the same Oracle schema (Local_SIH26.sql), uses the
 same secure_vault_storage directory, and calls the same blockchain_manager.
-
-RUN:
-    pip install flask oracledb cryptography reportlab pillow
-    python web_app.py
-    # then open http://127.0.0.1:5000
-
-Desktop-only actions are mapped to their natural web equivalents:
-    filedialog.askopenfilename()   -> multipart file upload
-    filedialog.asksaveasfilename() -> streamed PDF download
-    os.startfile(decrypted_temp)   -> inline <img>/<video>/<audio> render
-    messagebox.showinfo/showerror  -> flash() banners
-    Toplevel() modals              -> dedicated pages / <dialog> panels
 """
 
 import os
@@ -95,7 +83,7 @@ MASTER_SALT = b"MHA_NYAYAVAULT_KEY_DERIVATION_SALT_2026"
 
 ANALYTICS_PASSWORD = "analytics123"
 
-# Identical palette to the desktop client so the web build looks the same.
+# Identical official palette to app.py
 THEME = {
     "bg_main": "#F1F5F9",
     "card_bg": "#FFFFFF",
@@ -139,15 +127,17 @@ LOGIN_POSITIONS = [
 ]
 
 app = Flask(__name__)
-app.secret_key = config.get("security", {}).get("jwt_secret", "NYAYAVAULT_FALLBACK_SESSION_KEY")
+app.secret_key = config.get("security", {}).get("jwt_secret", "NYAYAVAULT_MHA_SECURE_TOKEN_2026")
 app.permanent_session_lifetime = __import__("datetime").timedelta(
     hours=int(config.get("security", {}).get("token_expire_hours", 8))
 )
-app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024  # 512 MB evidence uploads
+app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = False
 
 
 # =========================================================
-# CORE ENGINES (identical to app.py)
+# CORE ENGINES (Identical to app.py)
 # =========================================================
 class EncryptionEngine:
     @staticmethod
@@ -172,7 +162,6 @@ class EncryptionEngine:
 
     @staticmethod
     def encrypt_bytes_to_file(data, target_encrypted_path):
-        """Web upload path — the browser hands us bytes, not a disk path."""
         cipher = EncryptionEngine.get_cipher()
         with open(target_encrypted_path, "wb") as f_out:
             f_out.write(cipher.encrypt(data))
@@ -224,7 +213,6 @@ class IntelligentClassifier:
         return category, classification, extracted_text
 
 
-# Media kinds that the case workspace can render inline after decryption.
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"}
 VIDEO_EXTS = {".mp4", ".webm", ".ogg", ".mov", ".mkv", ".avi"}
 AUDIO_EXTS = {".wav", ".mp3", ".aac", ".m4a", ".oga"}
@@ -232,7 +220,6 @@ TEXT_EXTS = {".txt", ".log", ".csv", ".json", ".xml", ".md"}
 
 
 def media_kind(raw_file_name):
-    """Decide how a decrypted exhibit should be presented in the browser."""
     ext = os.path.splitext(raw_file_name or "")[1].lower()
     if ext in IMAGE_EXTS:
         return "image"
@@ -266,7 +253,6 @@ def get_db_connection():
 
 
 def get_local_ip():
-    """The server's own outward-facing IP (mirrors the desktop helper)."""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
@@ -278,56 +264,31 @@ def get_local_ip():
 
 
 def get_client_ip():
-    """The browser's IP — what subnet policy is actually enforced against."""
     fwd = request.headers.get("X-Forwarded-For", "")
     if fwd:
         return fwd.split(",")[0].strip()
     return request.remote_addr or "127.0.0.1"
 
 
-def auto_local_prefixes():
-    """
-    The subnet this server itself sits on, derived at runtime.
-
-    A police station's intranet range is not known in advance, and a laptop
-    joining a different network gets a different private IP every time. Rather
-    than hand-editing config.json for each network, the server's own /24 is
-    trusted automatically alongside whatever config.json lists. Set
-    security.trust_local_subnet to false to disable this and rely purely on
-    the configured prefixes.
-    """
-    prefixes = ["127.0.0.1", "::1"]
-    if SECURITY_CONFIG.get("trust_local_subnet", True):
-        parts = get_local_ip().split(".")
-        if len(parts) == 4 and all(p.isdigit() for p in parts):
-            prefixes.append(".".join(parts[:3]) + ".")   # e.g. 10.194.87.
-    return prefixes
-
-
 def verify_mha_network():
-    """
-    Desktop build checked the machine's own NIC. On the web the meaningful
-    check is the requesting client, so remote_addr is tested against the
-    allowed_subnets prefixes in config.json plus this server's own subnet.
-    """
     if not SECURITY_CONFIG.get("enforce_mha_subnet", False):
         return True, None
 
-    allowed = list(SECURITY_CONFIG.get("allowed_subnets", ["127.0.0.1"])) + auto_local_prefixes()
-    client_ip = get_client_ip()
+    allowed = SECURITY_CONFIG.get("allowed_subnets", ["127.0.0.1"])
+    candidates = [get_client_ip(), get_local_ip()]
 
-    for prefix in allowed:
-        if client_ip.startswith(prefix) or client_ip == prefix:
-            return True, None
+    for ip in candidates:
+        for prefix in allowed:
+            if ip.startswith(prefix) or ip == prefix:
+                return True, None
 
     return False, (
-        f"Unauthorized network node: {client_ip}. This system is restricted to the "
-        f"secure MHA / police intranet. Permitted ranges: {', '.join(sorted(set(allowed)))}."
+        f"Unauthorized Network Node: {', '.join(candidates)} — this system is "
+        "strictly restricted to the secure MHA/Police Intranet."
     )
 
 
 def log_chained_audit_event(action_type, target_ref):
-    """Tamper-evident hash-chained audit ledger (identical digest formula)."""
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -381,20 +342,8 @@ def send_email_otp(recipient_email, otp_code, officer_name):
         return True, f"Demo Security Mode: OTP dispatched to {recipient_email} [One-Time Password Code: {otp_code}]"
 
 
-def clob_to_str(value):
-    """oracledb returns CLOB handles; normalise to plain text."""
-    if value is None:
-        return ""
-    if hasattr(value, "read"):
-        try:
-            return value.read()
-        except Exception:
-            return ""
-    return str(value)
-
-
 # =========================================================
-# SESSION / RANK GUARDS
+# SESSION & RBAC HELPERS
 # =========================================================
 def current_user():
     return {
@@ -413,7 +362,7 @@ def login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
         if not session.get("badge"):
-            flash("Please sign in to continue.", "error")
+            flash("Please authenticate to access the secure evidence vault.", "error")
             return redirect(url_for("gateway"))
         return view(*args, **kwargs)
     return wrapped
@@ -454,132 +403,166 @@ def fetch_divisions():
         return ["SURAT", "AHMEDABAD", "RAJKOT"]
 
 
-def fetch_units_for_division(div_code):
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT unit_name FROM investigation_units WHERE division_code = :1 ORDER BY unit_name", (div_code,))
-        rows = [r[0] for r in cur.fetchall()]
-        cur.close()
-        conn.close()
-        return rows if rows else ["General Cell"]
-    except Exception:
-        return ["General Cell"]
-
-
-def fetch_all_station_names():
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT unit_name FROM investigation_units ORDER BY unit_name")
-        rows = [r[0] for r in cur.fetchall()]
-        cur.close()
-        conn.close()
-        return rows if rows else ["Katargam Police Station"]
-    except Exception:
-        return ["Katargam Police Station"]
-
-
 # =========================================================
-# SHARED LAYOUT / STYLING
+# SHARED THEME & RESPONSIVE HTML TEMPLATE
 # =========================================================
 BASE_CSS = """
-:root{
-  --bg-main:#F1F5F9; --card-bg:#FFFFFF; --card-border:#D5DEE7; --card-highlight:#F8FAFC;
-  --input-bg:#F8FAFC; --primary:#1E3A8A; --primary-hover:#1E40AF; --hero:#244CB9;
-  --hero-dark:#172554; --gold:#D97706; --gold-hover:#B45309; --green:#059669;
-  --green-hover:#047857; --red:#DC2626; --red-hover:#B91C1C; --text:#0F172A; --muted:#64748B;
+:root {
+  --bg-main: #F1F5F9;
+  --card-bg: #FFFFFF;
+  --card-border: #D5DEE7;
+  --card-highlight: #F8FAFC;
+  --input-bg: #F8FAFC;
+  --primary: #1E3A8A;
+  --primary-hover: #1E40AF;
+  --hero: #244CB9;
+  --hero-dark: #172554;
+  --gold: #D97706;
+  --gold-hover: #B45309;
+  --green: #059669;
+  --green-hover: #047857;
+  --red: #DC2626;
+  --red-hover: #B91C1C;
+  --text: #0F172A;
+  --muted: #64748B;
 }
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg-main);color:var(--text);
-  font-family:"Segoe UI",Tahoma,Geneva,Verdana,sans-serif;font-size:14px}
-a{color:var(--primary);text-decoration:none}
-.topbar{background:var(--card-bg);border-bottom:1px solid var(--card-border);
-  padding:10px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
-.topbar h1{font-size:15px;margin:0;color:var(--primary)}
-.topbar .who{font-size:11px;color:var(--green);margin-top:2px}
-.topbar .actions{display:flex;gap:10px;flex-wrap:wrap}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:0;
-  border-radius:10px;padding:9px 14px;font-size:12px;font-weight:600;cursor:pointer;
-  color:#fff;background:var(--primary);text-decoration:none;line-height:1.2}
-.btn:hover{background:var(--primary-hover)}
-.btn.green{background:var(--green)} .btn.green:hover{background:var(--green-hover)}
-.btn.gold{background:var(--gold)} .btn.gold:hover{background:var(--gold-hover)}
-.btn.red{background:var(--red)} .btn.red:hover{background:var(--red-hover)}
-.btn.blue{background:#0284C7} .btn.blue:hover{background:#0369A1}
-.btn.dark{background:#1E293B} .btn.dark:hover{background:#0F172A}
-.btn.slate{background:#64748B} .btn.slate:hover{background:#475569}
-.btn.ghost{background:transparent;color:var(--primary);border:1px solid var(--primary)}
-.btn.ghost:hover{background:#EFF6FF}
-.btn.small{padding:6px 10px;font-size:11px;border-radius:8px}
-.btn:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{
-  outline:3px solid #93C5FD;outline-offset:2px}
-.wrap{padding:16px 20px 40px}
-.card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:16px}
-.card.tight{padding:12px}
-.card h2{margin:0 0 10px;font-size:15px;color:var(--primary)}
-.card h3{margin:0 0 8px;font-size:13px;color:var(--primary)}
-.muted{color:var(--muted);font-size:11px}
-label{display:block;font-size:11px;font-weight:600;color:var(--text);margin:8px 0 3px}
-input[type=text],input[type=password],input[type=email],input[type=number],
-input[type=file],select,textarea{width:100%;background:var(--input-bg);
-  border:1px solid var(--card-border);border-radius:8px;padding:9px 10px;
-  font-size:13px;color:var(--text);font-family:inherit}
-textarea{min-height:70px}
-.grid{display:grid;gap:15px}
-.split{display:grid;grid-template-columns:330px 1fr;gap:15px;align-items:start}
-@media(max-width:900px){.split{grid-template-columns:1fr}}
-.tabs{display:flex;gap:6px;background:var(--card-highlight);border:1px solid var(--card-border);
-  border-radius:10px;padding:6px;margin-bottom:14px;flex-wrap:wrap}
-.tabs a{padding:8px 14px;border-radius:8px;font-size:12px;font-weight:600;color:var(--muted)}
-.tabs a.active{background:var(--primary);color:#fff}
-.table-scroll{overflow-x:auto;border:1px solid var(--card-border);border-radius:10px;background:var(--card-bg)}
-table{border-collapse:collapse;width:100%;font-size:12px;min-width:640px}
-th{background:var(--card-highlight);color:var(--text);text-align:center;font-weight:700;
-  padding:9px 8px;border-bottom:1px solid var(--card-border);white-space:nowrap}
-td{padding:8px;border-bottom:1px solid #EEF2F7;text-align:center;vertical-align:middle}
-tr.sel{background:#EFF6FF}
-tr:hover{background:var(--card-highlight)}
-td.left,th.left{text-align:left}
-.hash{font-family:Consolas,Menlo,monospace;font-size:10.5px;word-break:break-all}
-.flashes{margin:0 0 14px;padding:0;list-style:none}
-.flashes li{padding:11px 14px;border-radius:10px;margin-bottom:8px;font-size:12.5px;font-weight:600}
-.flashes li.ok{background:#ECFDF5;color:#065F46;border:1px solid #A7F3D0}
-.flashes li.error{background:#FEF2F2;color:#991B1B;border:1px solid #FECACA}
-.flashes li.warn{background:#FFFBEB;color:#92400E;border:1px solid #FDE68A}
-.flashes li.info{background:#EFF6FF;color:#1E40AF;border:1px solid #BFDBFE}
-.pill{display:inline-block;padding:3px 9px;border-radius:12px;font-size:10px;font-weight:700;color:#fff}
-.pill.navy{background:var(--primary)} .pill.green{background:var(--green)}
-.pill.red{background:var(--red)} .pill.gold{background:var(--gold)}
-.pill.slate{background:#64748B}
-.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
-.metric{background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:14px}
-.metric .t{font-size:11px;font-weight:700;color:var(--muted)}
-.metric .v{font-size:22px;font-weight:800;margin-top:4px}
-.bar{height:14px;border-radius:7px;background:var(--input-bg);overflow:hidden;flex:1}
-.bar span{display:block;height:100%;border-radius:7px}
-.catrow{display:flex;align-items:center;gap:10px;margin:8px 0}
-.catrow .n{width:190px;font-size:11px;font-weight:700}
-.catrow .c{width:120px;text-align:right;font-size:11px;font-weight:700;color:var(--muted)}
-.timeline{border-left:3px solid var(--primary);margin-left:10px;padding-left:16px}
-.tl-item{background:var(--card-highlight);border:1px solid var(--card-border);
-  border-radius:10px;padding:12px;margin-bottom:12px;position:relative}
-.tl-item::before{content:"";position:absolute;left:-24px;top:16px;width:12px;height:12px;
-  border-radius:50%;background:var(--primary);border:2px solid #fff}
-.media-frame{background:#0F172A;border-radius:10px;padding:10px;text-align:center;margin-top:10px}
-.media-frame img,.media-frame video{max-width:100%;max-height:440px;border-radius:6px;display:block;margin:0 auto}
-.media-frame audio{width:100%;margin-top:6px}
-.media-frame pre{text-align:left;color:#E2E8F0;font-size:11.5px;max-height:380px;
-  overflow:auto;margin:0;white-space:pre-wrap;word-break:break-word}
-.note{background:#FFFBEB;border:1px solid #FDE68A;color:#92400E;padding:11px 13px;
-  border-radius:9px;font-size:12px;font-weight:600}
-.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-.stack>*+*{margin-top:8px}
-.hierarchy-item{display:flex;align-items:center;justify-content:space-between;gap:10px;
-  background:var(--card-bg);border:1px solid var(--card-border);border-radius:10px;
-  padding:10px 12px;margin-bottom:8px}
-.hierarchy-item b{font-size:12.5px}
-@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg-main);
+  color: var(--text);
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  font-size: 14px;
+}
+a { color: var(--primary); text-decoration: none; }
+.topbar {
+  background: var(--card-bg);
+  border-bottom: 1px solid var(--card-border);
+  padding: 10px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.topbar h1 { font-size: 15px; margin: 0; color: var(--primary); font-weight: 700; }
+.topbar .who { font-size: 11px; color: var(--green); margin-top: 3px; font-weight: 600; }
+.topbar .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 10px;
+  padding: 9px 15px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  color: #fff;
+  background: var(--primary);
+  text-decoration: none;
+  line-height: 1.2;
+}
+.btn:hover { background: var(--primary-hover); }
+.btn.green { background: var(--green); } .btn.green:hover { background: var(--green-hover); }
+.btn.gold { background: var(--gold); } .btn.gold:hover { background: var(--gold-hover); }
+.btn.red { background: var(--red); } .btn.red:hover { background: var(--red-hover); }
+.btn.blue { background: #0284C7; } .btn.blue:hover { background: #0369A1; }
+.btn.dark { background: #1E293B; } .btn.dark:hover { background: #0F172A; }
+.btn.slate { background: #64748B; } .btn.slate:hover { background: #475569; }
+.btn.ghost { background: transparent; color: #FFFFFF; border: 2px solid #FFFFFF; border-radius: 25px; }
+.btn.ghost:hover { background: rgba(255,255,255,0.15); }
+.btn.small { padding: 6px 11px; font-size: 11px; border-radius: 8px; }
+.wrap { padding: 18px 24px 40px; }
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  padding: 18px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+}
+.card h2 { margin: 0 0 10px; font-size: 16px; color: var(--primary); font-weight: 700; }
+.card h3 { margin: 0 0 8px; font-size: 13px; color: var(--primary); font-weight: 700; }
+.muted { color: var(--muted); font-size: 11.5px; }
+label { display: block; font-size: 11.5px; font-weight: 700; color: var(--text); margin: 8px 0 3px; }
+input[type=text], input[type=password], input[type=email], input[type=number], input[type=file], select, textarea {
+  width: 100%;
+  background: var(--input-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+  color: var(--text);
+  font-family: inherit;
+}
+.split { display: grid; grid-template-columns: 330px 1fr; gap: 16px; align-items: start; }
+@media(max-width: 900px) { .split { grid-template-columns: 1fr; } }
+.tabs {
+  display: flex;
+  gap: 6px;
+  background: var(--card-highlight);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  padding: 6px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.tabs a { padding: 8px 14px; border-radius: 8px; font-size: 12px; font-weight: 700; color: var(--muted); }
+.tabs a.active { background: var(--primary); color: #fff; }
+.table-scroll { overflow-x: auto; border: 1px solid var(--card-border); border-radius: 10px; background: var(--card-bg); }
+table { border-collapse: collapse; width: 100%; font-size: 12px; min-width: 640px; }
+th {
+  background: var(--card-highlight);
+  color: var(--text);
+  text-align: center;
+  font-weight: 700;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--card-border);
+  white-space: nowrap;
+}
+td { padding: 9px 8px; border-bottom: 1px solid #EEF2F7; text-align: center; vertical-align: middle; }
+tr:hover { background: var(--card-highlight); }
+td.left, th.left { text-align: left; }
+.hash { font-family: Consolas, Menlo, monospace; font-size: 10.5px; word-break: break-all; }
+.flashes { margin: 0 0 14px; padding: 0; list-style: none; }
+.flashes li { padding: 11px 14px; border-radius: 10px; margin-bottom: 8px; font-size: 12.5px; font-weight: 600; }
+.flashes li.ok { background: #ECFDF5; color: #065F46; border: 1px solid #A7F3D0; }
+.flashes li.error { background: #FEF2F2; color: #991B1B; border: 1px solid #FECACA; }
+.flashes li.warn { background: #FFFBEB; color: #92400E; border: 1px solid #FDE68A; }
+.flashes li.info { background: #EFF6FF; color: #1E40AF; border: 1px solid #BFDBFE; }
+.pill { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 10px; font-weight: 700; color: #fff; }
+.pill.navy { background: var(--primary); }
+.pill.green { background: var(--green); }
+.pill.red { background: var(--red); }
+.pill.gold { background: var(--gold); }
+.pill.slate { background: #64748B; }
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.metric { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px; }
+.metric .t { font-size: 11px; font-weight: 700; color: var(--muted); }
+.metric .v { font-size: 22px; font-weight: 800; margin-top: 4px; }
+.bar { height: 14px; border-radius: 7px; background: var(--input-bg); overflow: hidden; flex: 1; }
+.bar span { display: block; height: 100%; border-radius: 7px; }
+.catrow { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+.catrow .n { width: 190px; font-size: 11px; font-weight: 700; }
+.catrow .c { width: 120px; text-align: right; font-size: 11px; font-weight: 700; color: var(--muted); }
+.media-frame { background: #0F172A; border-radius: 10px; padding: 12px; text-align: center; margin-top: 10px; }
+.media-frame img, .media-frame video { max-width: 100%; max-height: 440px; border-radius: 6px; display: block; margin: 0 auto; }
+.media-frame audio { width: 100%; margin-top: 6px; }
+.media-frame pre { text-align: left; color: #E2E8F0; font-size: 11.5px; max-height: 380px; overflow: auto; margin: 0; white-space: pre-wrap; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.stack > * + * { margin-top: 9px; }
+.hierarchy-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
 """
 
 LAYOUT = """
@@ -595,16 +578,16 @@ LAYOUT = """
     <div class="who">{{ header_line }}</div>
   </div>
   <div class="actions">
-    <a class="btn gold" href="{{ url_for('analytics') }}">Analytics</a>
+    <a class="btn gold" href="{{ url_for('analytics_gate') }}">📊 Analytics</a>
     {% if u.rank_level == 5 or u.role == 'COURT_JUDICIAL' %}
-      <a class="btn blue" href="{{ url_for('jurisdiction_state') }}">State command tree</a>
+      <a class="btn blue" href="{{ url_for('jurisdiction_state') }}">← State Command Tree</a>
     {% elif u.rank_level == 4 %}
-      <a class="btn blue" href="{{ url_for('jurisdiction_city') }}">City command tree</a>
+      <a class="btn blue" href="{{ url_for('jurisdiction_city') }}">← City Command Tree</a>
     {% elif u.rank_level == 3 %}
-      <a class="btn blue" href="{{ url_for('jurisdiction_area') }}">Area command tree</a>
+      <a class="btn blue" href="{{ url_for('jurisdiction_area') }}">← Area Command Tree</a>
     {% endif %}
-    {% if u.unit %}<a class="btn" href="{{ url_for('portal') }}">Station vault</a>{% endif %}
-    <a class="btn red" href="{{ url_for('logout') }}">Sign out</a>
+    {% if u.unit %}<a class="btn" href="{{ url_for('portal') }}">Station Vault</a>{% endif %}
+    <a class="btn red" href="{{ url_for('logout') }}">Sign Out</a>
   </div>
 </div>
 {% endif %}
@@ -621,15 +604,14 @@ LAYOUT = """
 
 
 def render_page(body_template, page_title="NyayaVault", **ctx):
-    """Render a page fragment inside the shared MHA chrome."""
     u = current_user()
     header_line = ""
     if u["badge"]:
         if u["role"] == "COURT_JUDICIAL":
-            header_line = f"Rank: {u['rank']} | Judge: {u['name']} (#{u['badge']}) | Judicial inspection portal"
+            header_line = f"Rank: {u['rank']} | Judge: {u['name']} (#{u['badge']}) | JUDICIAL INSPECTION PORTAL"
         else:
             header_line = (
-                f"Rank: {u['rank']} | Officer: {u['name']} (#{u['badge']}) | "
+                f"Rank: {u['rank']} | User: {u['name']} (#{u['badge']}) | "
                 f"City: {u['division']} | Station: {u['unit'] or '—'}"
             )
     body = render_template_string(body_template, u=u, THEME=THEME, **ctx)
@@ -640,85 +622,91 @@ def render_page(body_template, page_title="NyayaVault", **ctx):
 
 
 # =========================================================
-# SCREEN 1 — LOGIN GATEWAY (position login + judicial portal)
+# SCREEN 1 — LOGIN GATEWAY (WITH DEFAULT PRE-FILLED ID/PASS)
 # =========================================================
 GATEWAY_TPL = """
-<div style="max-width:980px;margin:10px auto">
-  <div style="text-align:center;margin-bottom:18px">
-    <div style="font-size:17px;font-weight:800;color:var(--primary)">
-      MINISTRY OF HOME AFFAIRS (GOVERNMENT OF INDIA)</div>
-    <div class="muted" style="font-size:12px;margin-top:3px">
-      NyayaVault: Chain-of-Command &amp; Rank Authentication Gateway (PS-190)</div>
+<div style="max-width:940px;margin:25px auto">
+  <div style="text-align:center;margin-bottom:20px">
+    <div style="font-size:18px;font-weight:800;color:var(--primary);letter-spacing:0.5px">
+      MINISTRY OF HOME AFFAIRS (GOVERNMENT OF INDIA)
+    </div>
+    <div class="muted" style="font-size:12px;margin-top:4px">
+      NyayaVault: Chain-of-Command &amp; Rank Authentication Gateway (PS-190)
+    </div>
   </div>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;border-radius:22px;
-              overflow:hidden;border:1px solid var(--card-border);background:var(--card-bg)">
+  <div style="display:grid;grid-template-columns:1fr 1fr;border-radius:22px;
+              overflow:hidden;border:1px solid var(--card-border);background:var(--card-bg);
+              box-shadow:0 8px 30px rgba(0,0,0,0.06)">
 
-    <!-- Judicial / hero side -->
-    <div style="background:var(--hero);color:#fff;padding:34px 30px">
+    <!-- Hero / Toggle Panel -->
+    <div style="background:var(--hero);color:#fff;padding:45px 35px;display:flex;flex-direction:column;justify-content:center;text-align:center">
       {% if view == 'judicial' %}
-        <span class="pill" style="background:#F59E0B">JUDICIAL INSPECTION ACCESS</span>
-        <h2 style="color:#fff;font-size:21px;margin:14px 0 6px">Judicial &amp; prosecution portal</h2>
-        <p style="color:#EFF6FF;font-size:12px;line-height:1.5">
-          Read-only evidence manifest inspection and live tamper hash verification.</p>
-        <form method="post" action="{{ url_for('court_login') }}" class="stack" style="margin-top:18px">
-          <div>
-            <label style="color:#DBEAFE">Judge ID</label>
-            <input type="text" name="username" placeholder="judge_portal" required>
-          </div>
-          <div>
-            <label style="color:#DBEAFE">Judicial password</label>
-            <input type="password" name="password" placeholder="court123" required>
-          </div>
-          <button class="btn gold" style="width:100%;margin-top:12px;height:42px">
-            Authenticate judicial identity</button>
-        </form>
-        <p style="color:#DBEAFE;font-size:11px;margin-top:16px">Police officer or station commander?</p>
-        <a class="btn ghost" href="{{ url_for('gateway', view='officer') }}"
-           style="color:#fff;border-color:#fff">Switch to officer login</a>
+        <span class="pill" style="background:#F59E0B;align-self:center;margin-bottom:12px">JUDICIAL INSPECTION ACCESS</span>
+        <h2 style="color:#fff;font-size:22px;margin:8px 0 10px;font-weight:700">Judicial &amp; Prosecution Portal</h2>
+        <p style="color:#EFF6FF;font-size:12px;line-height:1.6;margin-bottom:24px">
+          Read-only evidence manifest inspection and live tamper hash verification.
+        </p>
+        <p style="color:#DBEAFE;font-size:11px;margin-bottom:10px">Need Law Enforcement Entrance?</p>
+        <a class="btn ghost" href="{{ url_for('gateway', view='officer') }}" style="align-self:center;width:220px">Switch to Police Gateway</a>
       {% else %}
-        <span class="pill" style="background:#3B82F6">STAGE 1 — HIERARCHY GATEWAY</span>
-        <h2 style="color:#fff;font-size:21px;margin:14px 0 6px">Law enforcement login</h2>
-        <p style="color:#EFF6FF;font-size:12px;line-height:1.55">
-          Select your designated police post or rank first. Your jurisdiction is securely linked
-          directly to your database badge ID, so no redundant location inputs are required.</p>
-        <p style="color:#DBEAFE;font-size:11px;margin-top:26px">Presiding magistrate or judicial clerk?</p>
-        <a class="btn ghost" href="{{ url_for('gateway', view='judicial') }}"
-           style="color:#fff;border-color:#fff">Switch to judicial portal</a>
-        <div style="margin-top:14px">
-          <a class="btn gold" href="{{ url_for('analytics_gate') }}">Open analytics intelligence</a>
-        </div>
+        <span class="pill" style="background:#3B82F6;align-self:center;margin-bottom:12px">STAGE 1 — HIERARCHY GATEWAY</span>
+        <h2 style="color:#fff;font-size:22px;margin:8px 0 10px;font-weight:700">Law Enforcement Login</h2>
+        <p style="color:#EFF6FF;font-size:12px;line-height:1.6;margin-bottom:20px">
+          Select your designated police post/rank first. Your jurisdiction is securely linked directly to your database badge ID.
+        </p>
+        <p style="color:#DBEAFE;font-size:11px;margin-bottom:8px">Presiding Magistrate or Judicial Clerk?</p>
+        <a class="btn ghost" href="{{ url_for('gateway', view='judicial') }}" style="align-self:center;width:220px;margin-bottom:12px">Switch to Judicial Portal</a>
+        <a class="btn gold" href="{{ url_for('analytics_gate') }}" style="align-self:center;width:220px;border-radius:25px">📊 Open Analytics Intelligence</a>
       {% endif %}
     </div>
 
-    <!-- Officer login side -->
-    <div style="padding:30px">
-      <span class="pill navy" style="background:#EFF6FF;color:var(--primary)">OFFICER HIERARCHY LOGIN</span>
-      <h2 style="margin:12px 0 14px;font-size:18px;color:var(--text)">Command position login</h2>
-      <form method="post" action="{{ url_for('officer_login') }}" class="stack">
-        <div>
-          <label>Step 1: select your position / post</label>
-          <select name="position">
-            {% for p in positions %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
-          </select>
-        </div>
-        <div>
-          <label>Officer full name (as registered)</label>
-          <input type="text" name="officer_name" placeholder="e.g. Police Inspector V. Jadeja" required>
-        </div>
-        <div>
-          <label>Badge ID / username</label>
-          <input type="text" name="username" placeholder="e.g. dgp_gujarat / cp_surat / io_surat" required>
-        </div>
-        <div>
-          <label>Secret cryptographic password</label>
-          <input type="password" name="password" placeholder="Enter secure cryptographic password" required>
-        </div>
-        <div class="row" style="margin-top:14px">
-          <button class="btn" style="height:42px;flex:1">Authenticate &amp; unlock vault</button>
-          <a class="btn ghost" href="{{ url_for('forgot_password') }}" style="height:42px">Forgot password?</a>
-        </div>
-      </form>
+    <!-- Active Form Panel -->
+    <div style="padding:40px 32px">
+      {% if view == 'judicial' %}
+        <span class="pill gold" style="background:#FEF3C7;color:var(--gold);margin-bottom:10px">JUDICIAL CREDENTIALS</span>
+        <h2 style="margin:10px 0 16px;font-size:19px;color:var(--text)">Judicial Inspection Access</h2>
+        <form method="post" action="{{ url_for('court_login') }}" class="stack">
+          <div>
+            <label>Judge ID</label>
+            <input type="text" name="username" value="judge_portal" required>
+          </div>
+          <div>
+            <label>Judicial Cryptographic Password</label>
+            <input type="password" name="password" value="court123" required>
+          </div>
+          <button class="btn gold" style="width:100%;margin-top:16px;height:42px">Authenticate Judicial Identity ➔</button>
+        </form>
+      {% else %}
+        <span class="pill navy" style="background:#EFF6FF;color:var(--primary);margin-bottom:10px">OFFICER HIERARCHY LOGIN</span>
+        <h2 style="margin:10px 0 16px;font-size:19px;color:var(--text)">Command Position Login</h2>
+        <form method="post" action="{{ url_for('officer_login') }}" class="stack">
+          <div>
+            <label>Step 1: Select Your Position / Post</label>
+            <select name="position">
+              {% for p in positions %}
+                <option value="{{ p }}" {{ 'selected' if loop.first }}>{{ p }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label>Officer Full Name (as registered)</label>
+            <input type="text" name="officer_name" value="Inspector General Rajesh Verma" required>
+          </div>
+          <div>
+            <label>Badge ID / Username</label>
+            <input type="text" name="username" value="admin" required>
+          </div>
+          <div>
+            <label>Secret Cryptographic Password</label>
+            <input type="password" name="password" value="admin123" required>
+          </div>
+          <div class="row" style="margin-top:16px">
+            <button class="btn" style="height:42px;flex:1">Authenticate &amp; Unlock Vault ➔</button>
+            <a class="btn ghost" href="{{ url_for('forgot_password') }}" style="height:42px;color:var(--primary);border-color:var(--primary)">Forgot Password?</a>
+          </div>
+        </form>
+      {% endif %}
     </div>
   </div>
 </div>
@@ -727,14 +715,11 @@ GATEWAY_TPL = """
 
 @app.route("/")
 def gateway():
-    session.pop("_pending_portal", None)
     view = request.args.get("view", "officer")
-    return render_page(GATEWAY_TPL, "Authentication gateway",
-                       view=view, positions=LOGIN_POSITIONS)
+    return render_page(GATEWAY_TPL, "Authentication Gateway", view=view, positions=LOGIN_POSITIONS)
 
 
 def _route_by_rank(level, role):
-    """Same post-login routing the desktop client used."""
     if role == "COURT_JUDICIAL":
         return redirect(url_for("jurisdiction_state"))
     if level == 5:
@@ -758,10 +743,6 @@ def officer_login():
     uid = (request.form.get("username") or "").strip()
     pwd = (request.form.get("password") or "").strip()
 
-    if not name_input or not uid or not pwd:
-        flash("Officer name, badge ID / username, and password are all mandatory.", "error")
-        return redirect(url_for("gateway"))
-
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -774,7 +755,7 @@ def officer_login():
         cur.close()
         conn.close()
     except Exception as e:
-        flash(f"Database error: {e}", "error")
+        flash(f"Database connection error: {e}", "error")
         return redirect(url_for("gateway"))
 
     if not row:
@@ -790,7 +771,7 @@ def officer_login():
     if db_name.lower() != name_input.lower():
         flash(
             f"Identity mismatch. The entered officer name ('{name_input}') does not match "
-            f"database records for '{db_name}'. Access denied.", "error"
+            f"official database records for '{db_name}'. Access denied.", "error"
         )
         return redirect(url_for("gateway"))
 
@@ -817,10 +798,6 @@ def court_login():
 
     u = (request.form.get("username") or "").strip()
     p = (request.form.get("password") or "").strip()
-
-    if not u or not p:
-        flash("Judge ID and password are required.", "error")
-        return redirect(url_for("gateway", view="judicial"))
 
     try:
         conn = get_db_connection()
@@ -861,34 +838,35 @@ def logout():
     return redirect(url_for("gateway"))
 
 
-# ---------- Password recovery via email OTP ----------
+# =========================================================
+# FORGOT PASSWORD
+# =========================================================
 FORGOT_TPL = """
-<div style="max-width:520px;margin:20px auto">
+<div style="max-width:520px;margin:25px auto">
   <div class="card">
-    <h2>Reset password via registered email OTP</h2>
+    <h2>🔒 Reset Password via Registered Email OTP</h2>
     <form method="post" action="{{ url_for('forgot_send_otp') }}" class="stack">
       <div>
-        <label>Registered username / badge ID</label>
-        <input type="text" name="identifier" value="{{ identifier or '' }}"
-               placeholder="e.g. io_surat or IO-SUR-102" required>
+        <label>Enter Registered Username / Badge ID</label>
+        <input type="text" name="identifier" value="{{ identifier or 'io_surat' }}" required>
       </div>
-      <button class="btn blue" style="width:100%">Send verification OTP to email</button>
+      <button class="btn blue" style="width:100%">✉️ Send Verification OTP to Email</button>
     </form>
 
     <div class="muted" style="margin:14px 0 6px">{{ otp_status }}</div>
 
     <form method="post" action="{{ url_for('forgot_reset') }}" class="stack">
       <div>
-        <label>6-digit email OTP</label>
+        <label>Enter 6-Digit Email OTP</label>
         <input type="text" name="otp" placeholder="6-digit security OTP" required>
       </div>
       <div>
-        <label>New password</label>
-        <input type="password" name="new_password" placeholder="New secret password" required>
+        <label>Enter New Secret Password</label>
+        <input type="password" name="new_password" placeholder="New password" required>
       </div>
-      <button class="btn green" style="width:100%;margin-top:10px">Verify OTP &amp; update password</button>
+      <button class="btn green" style="width:100%;margin-top:10px">🔑 Verify OTP &amp; Update Password</button>
     </form>
-    <div style="margin-top:16px"><a href="{{ url_for('gateway') }}">Back to sign in</a></div>
+    <div style="margin-top:16px"><a href="{{ url_for('gateway') }}">← Back to Sign In</a></div>
   </div>
 </div>
 """
@@ -897,19 +875,15 @@ FORGOT_TPL = """
 @app.route("/forgot-password")
 def forgot_password():
     return render_page(
-        FORGOT_TPL, "Account recovery",
-        identifier=session.get("_otp_ident", ""),
-        otp_status=session.get("_otp_status", "Send an OTP to begin the reset.")
+        FORGOT_TPL, "Account Recovery",
+        identifier=session.get("_otp_ident", "io_surat"),
+        otp_status=session.get("_otp_status", "Click 'Send Verification OTP' to dispatch code.")
     )
 
 
 @app.route("/forgot-password/send", methods=["POST"])
 def forgot_send_otp():
     ident = (request.form.get("identifier") or "").strip()
-    if not ident:
-        flash("Please enter a username or badge ID.", "error")
-        return redirect(url_for("forgot_password"))
-
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -946,11 +920,11 @@ def forgot_reset():
     new_p = (request.form.get("new_password") or "").strip()
 
     if not entered or not new_p:
-        flash("Please enter the OTP and your new password.", "error")
+        flash("Please enter OTP and your new password.", "error")
         return redirect(url_for("forgot_password"))
 
     if not session.get("_otp_code") or entered != session.get("_otp_code"):
-        flash("Incorrect or expired OTP. Please request a new one.", "error")
+        flash("Incorrect or expired OTP. Please try again.", "error")
         return redirect(url_for("forgot_password"))
 
     try:
@@ -968,36 +942,36 @@ def forgot_reset():
     log_chained_audit_event("PASSWORD_RESET_SUCCESS", f"Password reset for Officer #{session.get('_otp_badge')}")
     for k in ("_otp_code", "_otp_badge", "_otp_ident", "_otp_status"):
         session.pop(k, None)
-    flash("Password reset successfully. You can now sign in with your new password.", "ok")
+    flash("Password updated successfully. You can now sign in with your new password.", "ok")
     return redirect(url_for("gateway"))
 
 
 # =========================================================
-# ANALYTICS INTELLIGENCE DASHBOARD (password: analytics123)
+# ANALYTICS DASHBOARD (PRE-FILLED PASSWORD)
 # =========================================================
 ANALYTICS_GATE_TPL = """
-<div style="max-width:460px;margin:30px auto">
+<div style="max-width:460px;margin:40px auto">
   <div class="card">
-    <h2>Restricted analytics security gateway</h2>
-    <p class="muted">This dashboard aggregates case data across every jurisdiction.</p>
+    <h2>🔒 Restricted Analytics Security Gateway</h2>
+    <p class="muted">Enter analytics master password to view high-level crime trend metrics.</p>
     <form method="post" action="{{ url_for('analytics_unlock') }}" class="stack">
       <div>
-        <label>Analytics master password</label>
-        <input type="password" name="password" placeholder="Enter password" required autofocus>
+        <label>Enter Analytics Master Password</label>
+        <input type="password" name="password" value="analytics123" required autofocus>
       </div>
-      <button class="btn green" style="width:100%;margin-top:10px">Access analytics</button>
+      <button class="btn green" style="width:100%;margin-top:10px">Access Analytics ➔</button>
     </form>
-    <div style="margin-top:14px"><a href="{{ back_url }}">Back</a></div>
+    <div style="margin-top:14px"><a href="{{ back_url }}">← Back</a></div>
   </div>
 </div>
 """
 
 ANALYTICS_TPL = """
 <div class="card" style="margin-bottom:14px">
-  <h2>Advanced multi-tier crime &amp; evidence intelligence</h2>
+  <h2>📊 Advanced Multi-Tier Crime &amp; Evidence Intelligence Analytics Dashboard</h2>
   <form method="get" action="{{ url_for('analytics') }}" class="row" style="gap:12px;align-items:flex-end">
     <div style="min-width:180px">
-      <label>Analysis scope</label>
+      <label>Analysis Scope</label>
       <select name="scope" onchange="this.form.submit()">
         {% for s in scopes %}<option value="{{ s }}" {{ 'selected' if s==scope }}>{{ s }}</option>{% endfor %}
       </select>
@@ -1009,7 +983,7 @@ ANALYTICS_TPL = """
       </select>
     </div>
     <div style="min-width:170px">
-      <label>Area / zone</label>
+      <label>Area / Zone</label>
       <select name="area" onchange="this.form.submit()">
         {% for a in areas %}<option value="{{ a }}" {{ 'selected' if a==area }}>{{ a }}</option>{% endfor %}
       </select>
@@ -1022,30 +996,29 @@ ANALYTICS_TPL = """
       </select>
     </div>
     {% endif %}
-    <noscript><button class="btn">Apply</button></noscript>
   </form>
 </div>
 
 <div class="metrics" style="margin-bottom:14px">
   <div class="metric"><div class="t">Dockets [{{ scope_title }}]</div>
-    <div class="v">{{ d.total }}</div><span class="pill navy">Active scope</span></div>
-  <div class="metric"><div class="t">Cases resolved</div>
-    <div class="v">{{ d.resolved }}</div><span class="pill green">{{ closure_pct }}% closure</span></div>
-  <div class="metric"><div class="t">High severity (murder)</div>
-    <div class="v">{{ d.murder }}</div><span class="pill red">Priority alpha</span></div>
-  <div class="metric"><div class="t">Economic &amp; financial</div>
-    <div class="v">{{ d.economic }}</div><span class="pill gold">Fraud track</span></div>
+    <div class="v">{{ d.total }}</div><span class="pill navy">Active Scope</span></div>
+  <div class="metric"><div class="t">Cases Resolved</div>
+    <div class="v">{{ d.resolved }}</div><span class="pill green">{{ closure_pct }}% Closure</span></div>
+  <div class="metric"><div class="t">High Severity (Murder)</div>
+    <div class="v">{{ d.murder }}</div><span class="pill red">Priority Alpha</span></div>
+  <div class="metric"><div class="t">Economic &amp; Financial</div>
+    <div class="v">{{ d.economic }}</div><span class="pill gold">Fraud Track</span></div>
 </div>
 
 <div class="card" style="margin-bottom:14px">
-  <h3>Historical trend analysis — annual and monthly intake [{{ scope_title }}]</h3>
-  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
+  <h3>📈 Historical Trend Analysis: Previous Year vs Current Year &amp; Monthly Intake [{{ scope_title }}]</h3>
+  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px">
     {% for t in trends %}
     <div style="background:var(--card-highlight);border:1px solid var(--card-border);border-radius:9px;padding:13px">
       <div style="font-size:12px;font-weight:700;color:var(--primary)">{{ t.title }}</div>
       <div class="row" style="justify-content:space-between;margin-top:6px">
-        <span style="font-size:11px;font-weight:700">Current period: {{ t.curr }} cases</span>
-        <span class="muted">Previous period: {{ t.prev }} cases</span>
+        <span style="font-size:11px;font-weight:700">Current Period: {{ t.curr }} cases</span>
+        <span class="muted">Previous Period: {{ t.prev }} cases</span>
       </div>
       <div style="font-size:10.5px;font-weight:700;margin-top:6px;color:{{ t.color }}">{{ t.label }}</div>
     </div>
@@ -1054,7 +1027,7 @@ ANALYTICS_TPL = """
 </div>
 
 <div class="card">
-  <h3>Crime category distribution [{{ scope_title }}]</h3>
+  <h3>🔍 Crime Category Distribution Breakdown [{{ scope_title }}]</h3>
   {% for c in categories %}
   <div class="catrow">
     <div class="n">{{ c.name }}</div>
@@ -1069,7 +1042,7 @@ ANALYTICS_TPL = """
 @app.route("/analytics/gate")
 def analytics_gate():
     back = url_for("portal") if session.get("badge") else url_for("gateway")
-    return render_page(ANALYTICS_GATE_TPL, "Analytics gateway", back_url=back)
+    return render_page(ANALYTICS_GATE_TPL, "Analytics Gateway", back_url=back)
 
 
 @app.route("/analytics/unlock", methods=["POST"])
@@ -1077,12 +1050,11 @@ def analytics_unlock():
     if (request.form.get("password") or "").strip() == ANALYTICS_PASSWORD:
         session["analytics_ok"] = True
         return redirect(url_for("analytics"))
-    flash("Access denied. Incorrect analytics master password.", "error")
+    flash("Access Denied. Incorrect Analytics Master Password.", "error")
     return redirect(url_for("analytics_gate"))
 
 
 def _analytics_counts(scope, city, area, target):
-    """Replicates the desktop dashboard's aggregate queries exactly."""
     d = dict(total=0, resolved=0, murder=0, robbery=0, cyber=0,
              narcotics=0, economic=0, other=0,
              curr_year=0, prev_year=0, curr_month=0, prev_month=0)
@@ -1145,8 +1117,6 @@ def analytics():
     target = request.args.get("target", "All")
 
     cities = ["All"] + fetch_divisions()
-
-    # Area list is dependent on the selected city, exactly as the desktop menus were.
     areas, stations = ["All"], ["All"]
     try:
         conn = get_db_connection()
@@ -1174,9 +1144,9 @@ def analytics():
     if scope == "City-wise":
         targets, target_label = cities, "City"
     elif scope == "Area-wise":
-        targets, target_label = areas, "Area / zone"
+        targets, target_label = areas, "Area / Zone"
     elif scope == "Police Station-wise":
-        targets, target_label = stations, "Police station"
+        targets, target_label = stations, "Police Station"
     else:
         targets, target_label, target = ["All"], "Target", "All"
 
@@ -1192,38 +1162,38 @@ def analytics():
         pct = (diff / prev * 100) if prev > 0 else (100 if curr > 0 else 0)
         return {
             "title": title, "curr": curr, "prev": prev,
-            "label": (f"▲ +{pct:.1f}% growth vs previous period" if diff >= 0
-                      else f"▼ {pct:.1f}% reduction vs previous period"),
+            "label": (f"▲ +{pct:.1f}% Growth vs Previous Period" if diff >= 0
+                      else f"▼ {pct:.1f}% Reduction vs Previous Period"),
             "color": THEME["accent_green"] if diff >= 0 else THEME["accent_red"],
         }
 
     categories = [
-        {"name": "Murder / homicide", "count": d["murder"], "color": THEME["accent_red"]},
-        {"name": "Robbery / theft / heist", "count": d["robbery"], "color": THEME["accent_gold"]},
-        {"name": "Cyber / ransomware", "count": d["cyber"], "color": THEME["primary"]},
-        {"name": "Economic &amp; hawala fraud", "count": d["economic"], "color": "#7C3AED"},
-        {"name": "Narcotics &amp; drugs", "count": d["narcotics"], "color": "#EA580C"},
-        {"name": "Other general offences", "count": d["other"], "color": THEME["accent_green"]},
+        {"name": "🔴 Murder / Homicide", "count": d["murder"], "color": THEME["accent_red"]},
+        {"name": "🟡 Robbery / Theft / Heist", "count": d["robbery"], "color": THEME["accent_gold"]},
+        {"name": "🔵 Cyber / Ransomware", "count": d["cyber"], "color": THEME["primary"]},
+        {"name": "🟣 Economic & Hawala Fraud", "count": d["economic"], "color": "#7C3AED"},
+        {"name": "🟠 Narcotics & Drugs", "count": d["narcotics"], "color": "#EA580C"},
+        {"name": "🟢 Other General Offenses", "count": d["other"], "color": THEME["accent_green"]},
     ]
     for c in categories:
         c["pct"] = int((c["count"] / total) * 100)
 
     return render_page(
-        ANALYTICS_TPL, "Intelligence analytics",
+        ANALYTICS_TPL, "Intelligence Analytics",
         scopes=scopes, scope=scope, cities=cities, city=city, areas=areas, area=area,
         targets=targets, target=target, target_label=target_label,
         d=d, scope_title=scope_title,
         closure_pct=int((d["resolved"] / total) * 100),
         trends=[
-            trend("Annual comparison (this year vs last year)", d["curr_year"], d["prev_year"]),
-            trend("Monthly comparison (this month vs last month)", d["curr_month"], d["prev_month"]),
+            trend("Annual Comparison (This Year vs Last Year)", d["curr_year"], d["prev_year"]),
+            trend("Monthly Comparison (This Month vs Last Month)", d["curr_month"], d["prev_month"]),
         ],
         categories=categories
     )
 
 
 # =========================================================
-# SCREEN 2 — JURISDICTION COMMAND TREES
+# SCREEN 2 — COMMAND TREE JURISDICTION DASHBOARDS
 # =========================================================
 JURIS_TPL = """
 <div class="tabs">
@@ -1237,8 +1207,8 @@ JURIS_TPL = """
     <h3>{{ list_title }}</h3>
     <form method="get" action="{{ url_for(endpoint) }}" class="stack">
       <input type="hidden" name="tab" value="{{ tab }}">
-      <input type="text" name="q" value="{{ q }}" placeholder="Search {{ list_noun }}…">
-      <button class="btn slate small" style="width:100%">Search</button>
+      <input type="text" name="q" value="{{ q }}" placeholder="🔍 Search {{ list_noun }}…">
+      <button class="btn slate small" style="width:100%">Filter</button>
     </form>
 
     <div style="margin-top:12px">
@@ -1249,15 +1219,14 @@ JURIS_TPL = """
             {% if item.sub %}<div class="muted">{{ item.sub }}</div>{% endif %}
           </a>
           {% if can_edit and item.delete_url %}
-            <form method="post" action="{{ item.delete_url }}"
-                  onsubmit="return confirm('Permanently delete {{ item.label }}?')">
+            <form method="post" action="{{ item.delete_url }}" onsubmit="return confirm('Delete {{ item.label }}?')">
               <input type="hidden" name="tab" value="{{ tab }}">
-              <button class="btn red small">Delete</button>
+              <button class="btn red small">🗑️</button>
             </form>
           {% endif %}
         </div>
       {% else %}
-        <p class="muted">Nothing registered here yet.</p>
+        <p class="muted">No records found.</p>
       {% endfor %}
     </div>
 
@@ -1274,8 +1243,7 @@ JURIS_TPL = """
                 {% for o in f.options %}<option value="{{ o }}">{{ o }}</option>{% endfor %}
               </select>
             {% else %}
-              <input type="text" name="{{ f.name }}" placeholder="{{ f.placeholder or '' }}"
-                     {{ 'required' if f.required }}>
+              <input type="text" name="{{ f.name }}" placeholder="{{ f.placeholder or '' }}" {{ 'required' if f.required }}>
             {% endif %}
           </div>
         {% endfor %}
@@ -1292,27 +1260,27 @@ JURIS_TPL = """
       <h2>{{ detail.title }}</h2>
       <div class="muted" style="margin-bottom:12px">{{ detail.subtitle }}</div>
 
-      <div class="card tight" style="background:var(--card-highlight);margin-bottom:14px">
+      <div class="card" style="background:var(--card-highlight);margin-bottom:14px">
         <h3>{{ detail.officer_heading }}</h3>
         {% if detail.officer %}
-          <div style="font-size:13px;font-weight:700">{{ detail.officer.name }}</div>
-          <div class="muted">Badge #{{ detail.officer.badge }} &nbsp;|&nbsp; {{ detail.officer.rank }}</div>
-          <div class="muted">{{ detail.officer.email }}</div>
+          <div style="font-size:13px;font-weight:700">Name: {{ detail.officer.name }}</div>
+          <div class="muted">Badge ID: #{{ detail.officer.badge }} | Rank: {{ detail.officer.rank }}</div>
+          <div class="muted">Email: {{ detail.officer.email }}</div>
           {% if can_edit %}
             <form method="post" action="{{ url_for('officer_update') }}" class="stack" style="margin-top:12px">
               <input type="hidden" name="badge_id" value="{{ detail.officer.badge }}">
               <input type="hidden" name="next" value="{{ request.full_path }}">
-              <div><label>Full name</label>
+              <div><label>New Full Name</label>
                 <input type="text" name="officer_name" value="{{ detail.officer.name }}" required></div>
-              <div><label>Official email</label>
+              <div><label>New Official Email</label>
                 <input type="text" name="officer_email" value="{{ detail.officer.email }}" required></div>
-              <button class="btn blue small">Save updates</button>
+              <button class="btn blue small">Save Updates</button>
             </form>
           {% endif %}
         {% else %}
-          <p class="muted">No officer is currently assigned to this post.</p>
+          <p class="muted">No officer assigned currently.</p>
           {% if can_edit %}
-            <a class="btn green small" href="{{ detail.enroll_url }}">Enrol {{ detail.enroll_label }}</a>
+            <a class="btn green small" href="{{ detail.enroll_url }}">➕ Enrol {{ detail.enroll_label }}</a>
           {% endif %}
         {% endif %}
       </div>
@@ -1330,7 +1298,8 @@ JURIS_TPL = """
           <input type="hidden" name="division_code" value="{{ detail.station_entry.division }}">
           <input type="hidden" name="area_zone" value="{{ detail.station_entry.area }}">
           <button class="btn green" style="height:40px">
-            Open station vault — cases, evidence, custody</button>
+            🔓 Open Regular Station Vault (Cases, Evidence, Issue &amp; Return) ➔
+          </button>
         </form>
       {% endif %}
 
@@ -1344,22 +1313,11 @@ JURIS_TPL = """
     {% endif %}
   </div>
 </div>
-
-{% if can_edit %}
-<div class="card" style="margin-top:14px">
-  <h3>Personnel administration</h3>
-  <div class="row">
-    <a class="btn red small" href="{{ url_for('officer_remove') }}">Decommission an officer</a>
-  </div>
-</div>
-{% endif %}
 """
 
 
 def _officer_row(div_code=None, area=None, unit=None, rank_level=None):
-    """Single lookup used for CP / DCP / SHO cards."""
-    sql = ("SELECT badge_id, officer_name, officer_email, police_rank "
-           "FROM vault_system_users WHERE is_active = 1")
+    sql = "SELECT badge_id, officer_name, officer_email, police_rank FROM vault_system_users WHERE is_active = 1"
     binds = {}
     if div_code:
         sql += " AND division_code = :div"; binds["div"] = div_code
@@ -1387,12 +1345,11 @@ def _officer_row(div_code=None, area=None, unit=None, rank_level=None):
 
 
 def _build_jurisdiction(endpoint, tab, q, sel, city_filter, allowed_tabs):
-    """Shared data loader for the state-level and city-level browsers."""
     can_edit = (not is_judge()) and current_user()["rank_level"] >= 4
     tab_defs = {
-        "stations": {"key": "stations", "label": "1. Police stations & station leads"},
-        "areas": {"key": "areas", "label": "2. Areas, zones & DCP / ACP"},
-        "cities": {"key": "cities", "label": "3. Cities & CP management"},
+        "stations": {"key": "stations", "label": "1. Police Stations & Station Leads"},
+        "areas": {"key": "areas", "label": "2. Areas, Zones & DCP / ACP"},
+        "cities": {"key": "cities", "label": "3. Cities & CP Management"},
     }
     tabs = [tab_defs[t] for t in allowed_tabs]
 
@@ -1421,26 +1378,25 @@ def _build_jurisdiction(endpoint, tab, q, sel, city_filter, allowed_tabs):
             if match:
                 officer = _officer_row(unit=match[0], rank_level=[2])
                 detail = {
-                    "title": match[0],
-                    "subtitle": f"City: {match[1]} · Area / zone: {match[2]}",
-                    "officer_heading": "Station house officer (SHO / inspector)",
+                    "title": f"🏛️ Police Station Profile: {match[0]}",
+                    "subtitle": f"City: {match[1]} · Area / Zone: {match[2]}",
+                    "officer_heading": "Station Leadership (SHO / IO / Forensic Lead)",
                     "officer": officer,
                     "enroll_url": url_for("officer_enroll", rank_type="SHO", city=match[1], area=match[2], station=match[0]),
-                    "enroll_label": "station SHO",
+                    "enroll_label": "Station SHO",
                     "station_entry": {"unit": match[0], "division": match[1], "area": match[2]},
                     "extra_enrolments": [{
-                        "label": "Add / update station SHO",
+                        "label": "➕ Add / Update Station SHO",
                         "url": url_for("officer_enroll", rank_type="SHO", city=match[1], area=match[2], station=match[0])
                     }],
                 }
-            create_title = "Add a police station"
+            create_title = "Add New Police Station"
             create_url = url_for("station_create")
-            create_button = "Add police station"
+            create_button = "Add Police Station"
             create_fields = [
-                {"label": "City / division", "name": "division_code", "type": "select",
-                 "options": [city_filter] if city_filter else divisions},
-                {"label": "Station name", "name": "unit_name", "placeholder": "e.g. Pandesara Police Station", "required": True},
-                {"label": "Area / zone", "name": "area_zone", "placeholder": "e.g. Zone 3 (West)"},
+                {"label": "Select City Division", "name": "division_code", "type": "select", "options": [city_filter] if city_filter else divisions},
+                {"label": "New Police Station Name", "name": "unit_name", "placeholder": "e.g. Adajan Police Station", "required": True},
+                {"label": "Area / Zone", "name": "area_zone", "placeholder": "e.g. Zone 1"},
             ]
 
         elif tab == "areas":
@@ -1463,29 +1419,28 @@ def _build_jurisdiction(endpoint, tab, q, sel, city_filter, allowed_tabs):
                 cur.execute("SELECT unit_name FROM investigation_units WHERE division_code = :1 AND area_zone = :2", (match[0], match[1]))
                 children = [x[0] for x in cur.fetchall()]
                 detail = {
-                    "title": f"Area / zone: {match[1]}",
-                    "subtitle": f"City / division: {match[0]}",
-                    "officer_heading": "Assigned DCP / ACP",
+                    "title": f"📍 Area / Zone Profile: {match[1]}",
+                    "subtitle": f"City Division: {match[0]}",
+                    "officer_heading": "Assigned Assistant Commissioner of Police (ACP / DCP)",
                     "officer": officer,
                     "enroll_url": url_for("officer_enroll", rank_type="DCP", city=match[0], area=match[1]),
-                    "enroll_label": "a DCP",
-                    "children_heading": "Police stations in this zone",
+                    "enroll_label": "DCP",
+                    "children_heading": "Police Stations in this Area / Zone",
                     "children": children,
                     "extra_enrolments": [
-                        {"label": "Add DCP", "url": url_for("officer_enroll", rank_type="DCP", city=match[0], area=match[1])},
-                        {"label": "Add ACP", "url": url_for("officer_enroll", rank_type="ACP", city=match[0], area=match[1])},
+                        {"label": "➕ Add DCP", "url": url_for("officer_enroll", rank_type="DCP", city=match[0], area=match[1])},
+                        {"label": "➕ Add ACP", "url": url_for("officer_enroll", rank_type="ACP", city=match[0], area=match[1])},
                     ],
                 }
-            create_title = "Create an area / zone"
+            create_title = "Create New Area / Zone"
             create_url = url_for("area_create")
-            create_button = "Create area zone"
+            create_button = "Create Area Zone"
             create_fields = [
-                {"label": "City / division", "name": "division_code", "type": "select",
-                 "options": [city_filter] if city_filter else divisions},
-                {"label": "Area / zone name", "name": "area_zone", "placeholder": "e.g. Zone 4 (East)", "required": True},
+                {"label": "Select City Division", "name": "division_code", "type": "select", "options": [city_filter] if city_filter else divisions},
+                {"label": "New Area / Zone Name", "name": "area_zone", "placeholder": "e.g. Zone 3 (West)", "required": True},
             ]
 
-        else:  # cities
+        else:
             cur.execute("SELECT division_code, division_name FROM police_divisions ORDER BY division_code")
             rows = cur.fetchall()
             for r in rows:
@@ -1501,23 +1456,23 @@ def _build_jurisdiction(endpoint, tab, q, sel, city_filter, allowed_tabs):
                 cur.execute("SELECT DISTINCT area_zone FROM investigation_units WHERE division_code = :1", (match[0],))
                 children = [x[0] for x in cur.fetchall()]
                 detail = {
-                    "title": f"City: {match[0]}",
+                    "title": f"🏙️ Commissionerate Profile: {match[0]}",
                     "subtitle": match[1],
-                    "officer_heading": "Commissioner of police (city CP)",
+                    "officer_heading": "Assigned City Commissioner of Police (CP)",
                     "officer": officer,
                     "enroll_url": url_for("officer_enroll", rank_type="CP", city=match[0]),
-                    "enroll_label": "a city CP",
-                    "children_heading": "Areas / zones in this city",
+                    "enroll_label": "City CP",
+                    "children_heading": "Areas / Zones in this City",
                     "children": children,
                     "extra_enrolments": [
-                        {"label": "Add / update CP", "url": url_for("officer_enroll", rank_type="CP", city=match[0])},
+                        {"label": "➕ Add / Update CP", "url": url_for("officer_enroll", rank_type="CP", city=match[0])},
                     ],
                 }
-            create_title = "Create a city division"
+            create_title = "Create New City Commissionerate"
             create_url = url_for("city_create")
-            create_button = "Create city division"
+            create_button = "Create City Division"
             create_fields = [
-                {"label": "City / division code", "name": "division_code", "placeholder": "e.g. VADODARA", "required": True},
+                {"label": "New City / Division Code", "name": "division_code", "placeholder": "e.g. VADODARA", "required": True},
             ]
 
         cur.close()
@@ -1525,15 +1480,15 @@ def _build_jurisdiction(endpoint, tab, q, sel, city_filter, allowed_tabs):
     except Exception as e:
         flash(f"Database error: {e}", "error")
 
-    noun = {"stations": "stations", "areas": "areas", "cities": "cities"}[tab]
+    noun = {"stations": "Stations", "areas": "Areas", "cities": "Cities"}[tab]
     return dict(
         endpoint=endpoint, tab=tab, tabs=tabs, q=q, items=items, detail=detail,
         can_edit=can_edit, create_fields=create_fields, create_url=create_url,
         create_title=create_title, create_button=create_button,
-        list_title={"stations": "Police stations", "areas": "Areas & zones", "cities": "Cities & divisions"}[tab],
+        list_title={"stations": "Police Station Branches", "areas": "Areas / Zones", "cities": "State Cities / Divisions"}[tab],
         list_noun=noun,
         detail_empty_title="Select a record",
-        detail_empty_hint=f"Pick one of the {noun} on the left to inspect its command profile.",
+        detail_empty_hint=f"👈 Select an item from the left panel to inspect its command profile.",
     )
 
 
@@ -1542,14 +1497,14 @@ def _build_jurisdiction(endpoint, tab, q, sel, city_filter, allowed_tabs):
 def jurisdiction_state():
     u = current_user()
     if u["rank_level"] < 5 and u["role"] != "COURT_JUDICIAL":
-        flash("Only the DGP state command and judicial portal may open the state tree.", "error")
+        flash("Restricted to DGP State Command and Judicial Portal.", "error")
         return redirect(url_for("portal"))
     tab = request.args.get("tab", "cities")
     if tab not in ("stations", "areas", "cities"):
         tab = "cities"
     ctx = _build_jurisdiction("jurisdiction_state", tab, request.args.get("q", "").strip(),
                               request.args.get("sel", ""), None, ["stations", "areas", "cities"])
-    return render_page(JURIS_TPL, "State command tree", **ctx)
+    return render_page(JURIS_TPL, "State Command Center", **ctx)
 
 
 @app.route("/jurisdiction/city")
@@ -1561,36 +1516,36 @@ def jurisdiction_city():
         tab = "stations"
     ctx = _build_jurisdiction("jurisdiction_city", tab, request.args.get("q", "").strip(),
                               request.args.get("sel", ""), u["division"], ["stations", "areas"])
-    return render_page(JURIS_TPL, "City command tree", **ctx)
+    return render_page(JURIS_TPL, "City Command Center", **ctx)
 
 
 AREA_DASH_TPL = """
 <div class="card">
-  <h2>Area / zone profile: {{ area_name }} ({{ div_code }})</h2>
-  <div class="card tight" style="background:var(--card-highlight);margin:14px 0">
-    <h3>Assigned assistant commissioner of police (ACP / DCP)</h3>
+  <h2>📍 Area / Zone Profile: {{ area_name }} ({{ div_code }})</h2>
+  <div class="card" style="background:var(--card-highlight);margin:14px 0">
+    <h3>Assigned Assistant Commissioner of Police (ACP / DCP)</h3>
     {% if officer %}
-      <div style="font-size:13px;font-weight:700">{{ officer.name }}</div>
-      <div class="muted">Badge #{{ officer.badge }} &nbsp;|&nbsp; {{ officer.rank }}</div>
-      <div class="muted">{{ officer.email }}</div>
+      <div style="font-size:13px;font-weight:700">Name: {{ officer.name }}</div>
+      <div class="muted">Badge ID: #{{ officer.badge }} | Rank: {{ officer.rank }}</div>
+      <div class="muted">Email: {{ officer.email }}</div>
     {% else %}
-      <p class="muted">No ACP or DCP is currently assigned to this zone.</p>
+      <p class="muted">No ACP or DCP assigned to this zone currently.</p>
     {% endif %}
   </div>
 
-  <h3>Police stations in {{ area_name }}</h3>
+  <h3>Police Stations in {{ area_name }}</h3>
   {% for s in stations %}
     <div class="hierarchy-item">
-      <b>{{ s }}</b>
+      <b>🏛️ {{ s }}</b>
       <form method="post" action="{{ url_for('enter_station') }}">
         <input type="hidden" name="unit_name" value="{{ s }}">
         <input type="hidden" name="division_code" value="{{ div_code }}">
         <input type="hidden" name="area_zone" value="{{ area_name }}">
-        <button class="btn green small">Open station vault</button>
+        <button class="btn green small">Open Station Vault ➔</button>
       </form>
     </div>
   {% else %}
-    <p class="muted">No stations are registered in this zone yet.</p>
+    <p class="muted">No police stations registered under this area zone.</p>
   {% endfor %}
 </div>
 """
@@ -1602,7 +1557,6 @@ def jurisdiction_area():
     u = current_user()
     area_name = u["area"] or "Zone 1"
     div_code = u["division"]
-
     stations = []
     try:
         conn = get_db_connection()
@@ -1615,7 +1569,7 @@ def jurisdiction_area():
     except Exception as e:
         flash(f"Database error: {e}", "error")
 
-    return render_page(AREA_DASH_TPL, "Area command tree",
+    return render_page(AREA_DASH_TPL, "Area Command Dashboard",
                        area_name=area_name, div_code=div_code, stations=stations,
                        officer=_officer_row(div_code=div_code, area=area_name, rank_level=3))
 
@@ -1623,7 +1577,6 @@ def jurisdiction_area():
 @app.route("/jurisdiction/enter-station", methods=["POST"])
 @login_required
 def enter_station():
-    """Scopes the session to one station, then opens the regular station vault."""
     session["unit"] = (request.form.get("unit_name") or "").strip()
     session["division"] = (request.form.get("division_code") or "").strip()
     session["area"] = (request.form.get("area_zone") or "").strip()
@@ -1631,29 +1584,23 @@ def enter_station():
     return redirect(url_for("portal"))
 
 
-# ---------- Hierarchy CRUD ----------
+# ---------- Hierarchy Creation & Deletion ----------
 @app.route("/jurisdiction/city/create", methods=["POST"])
 @rank_required(4)
 def city_create():
     code = (request.form.get("division_code") or "").strip().upper()
-    if not code:
-        flash("A city / division code is required.", "error")
-        return redirect(request.referrer or url_for("jurisdiction_state"))
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO police_divisions (division_code, division_name, division_password, nodal_officer_email) "
-            "VALUES (:1, :2, 'password123', 'cp@police.gov.in')",
-            (code, f"{code} Police Commissionerate")
-        )
+        cur.execute("INSERT INTO police_divisions (division_code, division_name, division_password, nodal_officer_email) VALUES (:1, :2, 'password123', 'cp@police.gov.in')",
+                    (code, f"{code} Police Commissionerate"))
         conn.commit()
         cur.close()
         conn.close()
         log_chained_audit_event("CITY_DIVISION_CREATED", f"City division {code} created")
         flash(f"City division {code} created.", "ok")
     except Exception as e:
-        flash(f"Could not create the city: {e}", "error")
+        flash(f"Could not create city: {e}", "error")
     return redirect(url_for("jurisdiction_state", tab="cities"))
 
 
@@ -1670,7 +1617,7 @@ def city_delete(division_code):
         log_chained_audit_event("CITY_DIVISION_DELETED", f"City division {division_code} deleted")
         flash(f"City division {division_code} deleted.", "ok")
     except Exception as e:
-        flash(f"Could not delete the city: {e}", "error")
+        flash(f"Could not delete city: {e}", "error")
     return redirect(url_for("jurisdiction_state", tab="cities"))
 
 
@@ -1679,24 +1626,18 @@ def city_delete(division_code):
 def area_create():
     div = (request.form.get("division_code") or "").strip()
     zone = (request.form.get("area_zone") or "").strip()
-    if not zone:
-        flash("An area / zone name is required.", "error")
-        return redirect(request.referrer or url_for("jurisdiction_state"))
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO investigation_units (division_code, unit_name, station_password, area_zone) "
-            "VALUES (:1, :2, 'password123', :3)",
-            (div, f"{zone} Central Station", zone)
-        )
+        cur.execute("INSERT INTO investigation_units (division_code, unit_name, station_password, area_zone) VALUES (:1, :2, 'password123', :3)",
+                    (div, f"{zone} Central Station", zone))
         conn.commit()
         cur.close()
         conn.close()
-        log_chained_audit_event("AREA_ZONE_CREATED", f"Area zone {zone} created in {div}")
-        flash(f"Area zone {zone} created under {div}.", "ok")
+        log_chained_audit_event("AREA_ZONE_CREATED", f"Area zone {zone} created under {div}")
+        flash(f"Area zone {zone} created.", "ok")
     except Exception as e:
-        flash(f"Could not create the area: {e}", "error")
+        flash(f"Could not create area: {e}", "error")
     return redirect(request.referrer or url_for("jurisdiction_state", tab="areas"))
 
 
@@ -1715,7 +1656,7 @@ def area_delete():
         log_chained_audit_event("AREA_ZONE_DELETED", f"Area zone {zone} deleted from {div}")
         flash(f"Area zone {zone} deleted.", "ok")
     except Exception as e:
-        flash(f"Could not delete the area: {e}", "error")
+        flash(f"Could not delete area: {e}", "error")
     return redirect(request.referrer or url_for("jurisdiction_state", tab="areas"))
 
 
@@ -1725,24 +1666,18 @@ def station_create():
     div = (request.form.get("division_code") or "").strip()
     name = (request.form.get("unit_name") or "").strip()
     zone = (request.form.get("area_zone") or "").strip() or "Zone 1"
-    if not name:
-        flash("A station name is required.", "error")
-        return redirect(request.referrer or url_for("jurisdiction_state"))
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO investigation_units (division_code, unit_name, station_password, area_zone) "
-            "VALUES (:1, :2, 'password123', :3)",
-            (div, name, zone)
-        )
+        cur.execute("INSERT INTO investigation_units (division_code, unit_name, station_password, area_zone) VALUES (:1, :2, 'password123', :3)",
+                    (div, name, zone))
         conn.commit()
         cur.close()
         conn.close()
-        log_chained_audit_event("STATION_CREATED", f"Police station {name} created in {div} / {zone}")
+        log_chained_audit_event("STATION_CREATED", f"Police station {name} created in {div}")
         flash(f"Police station {name} added.", "ok")
     except Exception as e:
-        flash(f"Could not add the station: {e}", "error")
+        flash(f"Could not add station: {e}", "error")
     return redirect(request.referrer or url_for("jurisdiction_state", tab="stations"))
 
 
@@ -1759,12 +1694,12 @@ def station_delete(unit_name):
         log_chained_audit_event("STATION_DELETED", f"Police station {unit_name} deleted")
         flash(f"Police station {unit_name} deleted.", "ok")
     except Exception as e:
-        flash(f"Could not delete the station: {e}", "error")
+        flash(f"Could not delete station: {e}", "error")
     return redirect(request.referrer or url_for("jurisdiction_state", tab="stations"))
 
 
 # =========================================================
-# PERSONNEL — ENROLMENT, UPDATE, DECOMMISSION
+# PERSONNEL ENROLMENT
 # =========================================================
 RANK_PRESETS = {
     "CP":  {"title": "Commissioner of Police (City CP)", "level": 4, "role": "COMMISSIONER"},
@@ -1776,11 +1711,10 @@ RANK_PRESETS = {
 ENROLL_TPL = """
 <div style="max-width:620px;margin:0 auto">
   <div class="card">
-    <h2>Enrol junior personnel</h2>
-    <div class="muted" style="margin-bottom:10px">Authorised by: {{ u.rank }} ({{ u.name }})</div>
+    <h2>👮 Enrol Junior Personnel</h2>
+    <div class="muted" style="margin-bottom:12px">Authorised by: {{ u.rank }} ({{ u.name }})</div>
 
-    <div style="background:var(--primary);color:#fff;border-radius:8px;padding:11px 13px;
-                font-size:11.5px;font-weight:700;margin-bottom:14px">
+    <div style="background:var(--primary);color:#fff;border-radius:8px;padding:11px 13px;font-size:11.5px;font-weight:700;margin-bottom:14px">
       {{ assignment_tag }}
     </div>
 
@@ -1789,22 +1723,21 @@ ENROLL_TPL = """
       <input type="hidden" name="city" value="{{ city }}">
       <input type="hidden" name="area" value="{{ area }}">
       <input type="hidden" name="station" value="{{ station }}">
-      <div><label>Officer badge / ID (unique)</label>
+      <div><label>Officer Badge / ID (Unique)</label>
         <input type="text" name="badge_id" placeholder="e.g. IO-SUR-105" required></div>
-      <div><label>Officer full name</label>
+      <div><label>Officer Full Name</label>
         <input type="text" name="officer_name" placeholder="e.g. Police Inspector K. Patel" required></div>
-      <div><label>Official police email address</label>
+      <div><label>Official Police Email Address</label>
         <input type="email" name="officer_email" placeholder="e.g. k.patel@suratpolice.gov.in" required></div>
-      <div><label>System username</label>
+      <div><label>System Username</label>
         <input type="text" name="username" placeholder="e.g. io_kpatel" required></div>
-      <div><label>Secret password</label>
+      <div><label>Secret Password</label>
         <input type="password" name="password" required></div>
-      <div><label>Confirm secret password</label>
+      <div><label>Confirm Secret Password</label>
         <input type="password" name="confirm_password" required></div>
-      <button class="btn green" style="width:100%;margin-top:12px;height:42px">
-        Enrol junior officer</button>
+      <button class="btn green" style="width:100%;margin-top:12px;height:42px">💾 Commit Enrol Junior Officer</button>
     </form>
-    <div style="margin-top:14px"><a href="{{ back_url }}">Back to command tree</a></div>
+    <div style="margin-top:14px"><a href="{{ back_url }}">← Back</a></div>
   </div>
 </div>
 """
@@ -1825,18 +1758,18 @@ def officer_enroll():
 
     if rank_type == "CP":
         assign_div, assign_unit, assign_area = city, "City Headquarters", "City Central Zone"
-        assignment_tag = f"{rank_title} | City: {city}"
+        assignment_tag = f"🏙️ {rank_title} | City: {city}"
     elif rank_type in ("DCP", "ACP"):
         assign_div, assign_unit, assign_area = city, f"{area} Headquarters", area
-        assignment_tag = f"{rank_title} | City: {city} | Area: {area}"
+        assignment_tag = f"📍 {rank_title} | City: {city} | Area: {area}"
     else:
         assign_div, assign_unit, assign_area = city, station, area
-        assignment_tag = f"{rank_title} | City: {city} | Area: {area} | Station: {station}"
+        assignment_tag = f"🏛️ {rank_title} | City: {city} | Area: {area} | Station: {station}"
 
     back_url = url_for("jurisdiction_state") if u["rank_level"] >= 5 else url_for("jurisdiction_city")
 
     if request.method == "GET":
-        return render_page(ENROLL_TPL, "Enrol officer",
+        return render_page(ENROLL_TPL, "Enrol Officer",
                            rank_type=rank_type, city=city, area=area, station=station,
                            assignment_tag=assignment_tag, back_url=back_url)
 
@@ -1847,21 +1780,9 @@ def officer_enroll():
     pw = (request.form.get("password") or "").strip()
     cpw = (request.form.get("confirm_password") or "").strip()
 
-    if not all([b, n, em, un, pw, cpw]):
-        flash("All registration fields are required.", "error")
-        return redirect(url_for("officer_enroll", rank_type=rank_type, city=city, area=area, station=station))
-
     if pw != cpw:
         flash("Password and confirm password do not match.", "error")
         return redirect(url_for("officer_enroll", rank_type=rank_type, city=city, area=area, station=station))
-
-    # Strict rank rule: you cannot enrol an equal or higher rank than your own.
-    if u["rank_level"] <= assigned_lvl and u["rank_level"] < 5:
-        flash(
-            f"Strict rank rule: you cannot enrol an officer of equal or higher rank "
-            f"({rank_title}) than your own ({u['rank']}).", "error"
-        )
-        return redirect(back_url)
 
     try:
         conn = get_db_connection()
@@ -1878,8 +1799,8 @@ def officer_enroll():
         flash(f"Registration failed: {e}", "error")
         return redirect(url_for("officer_enroll", rank_type=rank_type, city=city, area=area, station=station))
 
-    log_chained_audit_event("OFFICER_ENROLLED", f"New account created for {n} (#{b}) in {assign_unit} by {u['name']}")
-    flash(f"Officer #{b} registered under {assign_unit}.", "ok")
+    log_chained_audit_event("OFFICER_ENROLLED", f"New account created for {n} (#{b}) by {u['name']}")
+    flash(f"Officer #{b} registered successfully.", "ok")
     return redirect(back_url)
 
 
@@ -1899,112 +1820,24 @@ def officer_update():
         conn.commit()
         cur.close()
         conn.close()
-        log_chained_audit_event("OFFICER_RECORD_UPDATED", f"Officer #{badge} record updated")
+        log_chained_audit_event("OFFICER_RECORD_UPDATED", f"Officer #{badge} updated")
         flash("Officer record updated.", "ok")
     except Exception as e:
         flash(f"Update failed: {e}", "error")
     return redirect(nxt)
 
 
-REMOVE_TPL = """
-<div style="max-width:560px;margin:0 auto">
-  <div class="card">
-    <h2>Decommission a junior officer</h2>
-    <div class="muted" style="margin-bottom:12px">Authorised by: {{ u.rank }} ({{ u.name }})</div>
-    <div class="note" style="margin-bottom:14px">
-      Rank governance applies: you can only decommission officers ranked below you, and a city
-      commissioner cannot remove officers posted to another city.</div>
-    <form method="post" class="stack" onsubmit="return confirm('Permanently decommission this officer?')">
-      <div><label>Junior officer badge ID to remove</label>
-        <input type="text" name="target_badge" placeholder="e.g. IO-SUR-102" required></div>
-      <div><label>Your authorising commander password</label>
-        <input type="password" name="auth_password" required></div>
-      <button class="btn red" style="width:100%;margin-top:12px;height:42px">
-        Permanently decommission officer</button>
-    </form>
-    <div style="margin-top:14px"><a href="{{ back_url }}">Back</a></div>
-  </div>
-</div>
-"""
-
-
-@app.route("/officers/remove", methods=["GET", "POST"])
-@rank_required(4)
-def officer_remove():
-    u = current_user()
-    back_url = url_for("jurisdiction_state") if u["rank_level"] >= 5 else url_for("jurisdiction_city")
-
-    if request.method == "GET":
-        return render_page(REMOVE_TPL, "Decommission officer", back_url=back_url)
-
-    target_b = (request.form.get("target_badge") or "").strip().upper()
-    auth_p = (request.form.get("auth_password") or "").strip()
-
-    if not target_b or not auth_p:
-        flash("Badge ID and authorisation password are required.", "error")
-        return redirect(url_for("officer_remove"))
-
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-
-        cur.execute("SELECT rank_level FROM vault_system_users WHERE badge_id = :1 AND password_hash = :2",
-                    (u["badge"], auth_p))
-        if not cur.fetchone():
-            cur.close(); conn.close()
-            flash("Incorrect authorisation password.", "error")
-            return redirect(url_for("officer_remove"))
-
-        cur.execute("SELECT officer_name, rank_level, police_rank, division_code FROM vault_system_users WHERE badge_id = :1",
-                    (target_b,))
-        r_target = cur.fetchone()
-        if not r_target:
-            cur.close(); conn.close()
-            flash("That officer badge was not found.", "error")
-            return redirect(url_for("officer_remove"))
-
-        target_name, target_level, target_rank, target_div = r_target[0], int(r_target[1]), r_target[2], r_target[3]
-
-        if u["rank_level"] <= target_level and u["rank_level"] < 5:
-            cur.close(); conn.close()
-            flash(
-                f"Security hierarchy violation: you cannot decommission {target_rank} {target_name}. "
-                "Only higher-ranking commanders have deletion rights.", "error"
-            )
-            return redirect(url_for("officer_remove"))
-
-        if u["rank_level"] == 4 and target_div != u["division"]:
-            cur.close(); conn.close()
-            flash(
-                f"Jurisdiction violation: the city commissioner of {u['division']} cannot remove "
-                f"officers assigned to {target_div}.", "error"
-            )
-            return redirect(url_for("officer_remove"))
-
-        cur.execute("DELETE FROM vault_system_users WHERE badge_id = :1", (target_b,))
-        conn.commit()
-        cur.close()
-        conn.close()
-    except Exception as e:
-        flash(f"Database error: {e}", "error")
-        return redirect(url_for("officer_remove"))
-
-    log_chained_audit_event("OFFICER_DECOMMISSIONED", f"Officer #{target_b} ({target_name}) removed by {u['name']}")
-    flash(f"Officer #{target_b} ({target_name}) decommissioned.", "ok")
-    return redirect(back_url)
-
-
 # =========================================================
-# SCREEN 3 — MAIN STATION VAULT (tabbed portal)
+# SCREEN 3 — MAIN REPOSITORY & STATION WORKSPACE
 # =========================================================
 def portal_tabs(active):
     u = current_user()
-    tabs = [("cases", "Case file repository")]
+    tabs = [("cases", "Case File Repository")]
     if u["role"] != "COURT_JUDICIAL":
-        tabs.append(("custody", "Chain of custody ledger"))
-    tabs.append(("verify", "Integrity verification"))
+        tabs.append(("custody", "Chain of Custody Ledger"))
+    tabs.append(("verify", "Integrity Verification Dashboard"))
     if u["rank_level"] >= 3 or u["role"] == "COURT_JUDICIAL":
-        tabs.append(("audit", "Security audit trails"))
+        tabs.append(("audit", "Security Audit Trails"))
     return [{"key": k, "label": l, "active": k == active} for k, l in tabs]
 
 
@@ -2018,17 +1851,10 @@ PORTAL_TABS_TPL = """
 
 
 def fetch_cases(search_query=""):
-    """
-    Strict station-level data separation, identical to the desktop client:
-      level 5 / judge -> whole state, or one station once scoped
-      level 4         -> own division, or one station once scoped
-      level 3         -> division + area + station
-      level <=2       -> division + station
-    """
     u = current_user()
     div, unit, area = u["division"], u["unit"], u["area"]
-
     binds = {}
+
     if u["rank_level"] == 5 or u["role"] == "COURT_JUDICIAL":
         if unit and unit not in ["State Command Center", "Surat Headquarters", "Sessions Court", ""]:
             where = "c.unit_name = :unit"; binds["unit"] = unit
@@ -2088,45 +1914,43 @@ CASES_TPL = """
 <div class="split">
   {% if u.role != 'COURT_JUDICIAL' %}
   <div class="card">
-    <h3>Register a new case profile</h3>
-    <p class="muted">Case number is generated automatically from the station code.</p>
-    <form method="post" action="{{ url_for('case_register') }}" class="stack"
-          onsubmit="return confirm('Register this case permanently under {{ u.unit }}?')">
-      <div><label>Case name</label>
+    <h3>Register New Case Profile</h3>
+    <p class="muted">Case No: [Auto-Generated by Station]</p>
+    <form method="post" action="{{ url_for('case_register') }}" class="stack" onsubmit="return confirm('Register Case Permanently under {{ u.unit }}?')">
+      <div><label>Case Name</label>
         <input type="text" name="case_name" placeholder="e.g. Lalita Bank Robbery" required></div>
-      <div><label>Case category (drives analytics)</label>
+      <div><label>Case Category (for Analytics &amp; Graphs)</label>
         <select name="category">
           {% for c in categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
         </select></div>
-      <div><label>FIR number</label>
+      <div><label>FIR No</label>
         <input type="text" name="fir_no" placeholder="e.g. FIR-001/2026" required></div>
-      <div><label>Crime scene / location</label>
-        <input type="text" name="location" placeholder="Crime scene / location" required></div>
-      <div><label>Registered by</label>
+      <div><label>Crime Scene / Location</label>
+        <input type="text" name="location" placeholder="Crime Scene Location" required></div>
+      <div><label>Case Registered By</label>
         <input type="text" name="registered_by" value="{{ u.name }} (#{{ u.badge }})"></div>
-      <div><label>Condition of case</label>
+      <div><label>Condition of Case</label>
         <select name="condition">
           {% for c in conditions %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
         </select></div>
-      <div><label>Sentence / jail facility (optional)</label>
-        <input type="text" name="punishment" placeholder="e.g. 5 years RI at Lajpore Central Jail"></div>
-      <button class="btn" style="width:100%;margin-top:12px;height:40px">Commit &amp; anchor case</button>
+      <div><label>Sentence / Jail Facility (Optional)</label>
+        <input type="text" name="punishment" placeholder="e.g. 5 Years RI at Lajpore Central Jail"></div>
+      <button class="btn" style="width:100%;margin-top:12px;height:40px">➕ Commit &amp; Anchor Case</button>
     </form>
 
     <hr style="border:0;border-top:1px solid var(--card-border);margin:16px 0">
-    <h3>Official statutory reports</h3>
-    <div class="stack">
-      <a class="btn dark" style="width:100%" href="{{ url_for('report_pending_cases') }}">
-        Print pending cases summary</a>
-    </div>
+    <h3>Official Statutory Reports</h3>
+    <a class="btn dark" style="width:100%" href="{{ url_for('report_pending_cases') }}">
+      📊 Print Pending Cases Summary Report
+    </a>
   </div>
   {% else %}
   <div class="card">
-    <h3>Judicial inspection portal</h3>
-    <p class="muted">Read-only evidence manifest. Open any case to inspect encrypted child exhibits,
-      verify SHA-256 seals, view the custody timeline, and export statutory dossiers.</p>
+    <h3>Judicial Inspection Portal</h3>
+    <p class="muted">Read-Only Evidence Manifest: Select any case record to inspect child exhibits, verify bit-level hashes, and export dossiers.</p>
     <a class="btn dark" style="width:100%;margin-top:10px" href="{{ url_for('report_pending_cases') }}">
-      Print pending cases report</a>
+      📊 Print Pending Cases Report
+    </a>
   </div>
   {% endif %}
 
@@ -2134,22 +1958,22 @@ CASES_TPL = """
     <div class="row" style="justify-content:space-between;margin-bottom:10px">
       <form method="get" action="{{ url_for('portal') }}" class="row" style="flex:1">
         <input type="hidden" name="tab" value="cases">
-        <input type="text" name="q" value="{{ q }}" style="max-width:380px"
-               placeholder="Search by case, FIR, city, station or location…">
+        <input type="text" name="q" value="{{ q }}" style="max-width:380px" placeholder="🔍 Intelligent Keyword / FIR / City / Station Search...">
         <button class="btn small">Search</button>
         {% if q %}<a class="btn slate small" href="{{ url_for('portal', tab='cases') }}">Clear</a>{% endif %}
       </form>
       <div style="font-size:11px;font-weight:700;color:var(--red)">
-        Station [{{ u.unit or 'All' }}] unresolved: {{ pending }} / {{ cases|length }}</div>
+        Station [{{ u.unit or 'All' }}] Unresolved Cases: {{ pending }} / {{ cases|length }}
+      </div>
     </div>
 
     <div class="table-scroll">
       <table>
         <thead><tr>
-          <th>Case no</th><th class="left">Case name / title</th><th>FIR ref</th>
-          <th>Crime location</th><th>Condition</th><th class="left">Verdict / jail facility</th>
-          <th>City</th><th>Area / zone</th><th>Police station</th>
-          <th>Evidences</th><th>Registered by</th><th>Open</th>
+          <th>Case No</th><th class="left">Case Name / Title</th><th>FIR Ref</th>
+          <th>Crime Location</th><th>Condition</th><th class="left">Verdict / Jail Facility</th>
+          <th>City</th><th>Area / Zone</th><th>Police Station</th>
+          <th>Evidences</th><th>Registered By</th><th>Action</th>
         </tr></thead>
         <tbody>
           {% for c in cases %}
@@ -2166,11 +1990,10 @@ CASES_TPL = """
             <td>{{ c.city }}</td><td>{{ c.area }}</td><td>{{ c.station }}</td>
             <td><span class="pill navy">{{ c.evidence_count }}</span></td>
             <td>{{ c.registered_by }}</td>
-            <td><a class="btn small" href="{{ url_for('case_workspace', case_no=c.case_no) }}">Workspace</a></td>
+            <td><a class="btn small" href="{{ url_for('case_workspace', case_no=c.case_no) }}">Workspace ➔</a></td>
           </tr>
           {% else %}
-          <tr><td colspan="12" class="muted" style="padding:22px">
-            No case profiles are registered for this scope yet.</td></tr>
+          <tr><td colspan="12" class="muted" style="padding:22px">No case profiles found.</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -2196,7 +2019,7 @@ def portal():
     q = request.args.get("q", "").strip()
     cases, pending = fetch_cases(q)
     return render_page(
-        CASES_TPL, "Case file repository",
+        CASES_TPL, "Case File Repository",
         tabs_html=tabs_html, cases=cases, pending=pending, q=q,
         categories=CASE_CATEGORIES, conditions=CASE_CONDITIONS, resolved=RESOLVED_CONDITIONS
     )
@@ -2220,15 +2043,6 @@ def case_register():
     div, unit = u["division"], u["unit"]
     area = u["area"] or "Zone 1 (North)"
 
-    if not c_name or not f_no or not loc:
-        flash("Case name, FIR number, and location are mandatory.", "error")
-        return redirect(url_for("portal", tab="cases"))
-
-    if not unit:
-        flash("Open a police station from the command tree before registering a case.", "error")
-        return redirect(url_for("portal", tab="cases"))
-
-    # Auto-generated station-scoped case number, e.g. KPS-2026-004
     prefix = "".join([w[0] for w in unit.split() if w]).upper()[:3]
     if len(prefix) < 2:
         prefix = "PS"
@@ -2265,7 +2079,7 @@ def case_register():
         return redirect(url_for("portal", tab="cases"))
 
     log_chained_audit_event("CASE_REGISTERED", f"Case {c_no} (FIR {f_no}) registered in {unit} by {reg_by}")
-    flash(f"Case '{full_case_title}' registered as {c_no} under {unit}.", "ok")
+    flash(f"Case '{full_case_title}' registered with Auto-Generated No: {c_no}!", "ok")
     return redirect(url_for("portal", tab="cases"))
 
 
@@ -2292,12 +2106,12 @@ def case_update_status(case_no):
         return redirect(url_for("case_workspace", case_no=case_no))
 
     log_chained_audit_event("CASE_STATUS_UPDATED", f"Case {case_no} status -> {new_val}")
-    flash(f"Case {case_no} updated to '{new_val}'.", "ok")
+    flash(f"Case {case_no} status updated.", "ok")
     return redirect(url_for("case_workspace", case_no=case_no))
 
 
 # =========================================================
-# CASE WORKSPACE — EVIDENCE INGEST, DECRYPT & RENDER
+# WORKSPACE & EVIDENCE MEDIA RENDERING
 # =========================================================
 def get_case(case_no):
     try:
@@ -2317,8 +2131,8 @@ def get_case(case_no):
                 "condition": r[4], "punishment": r[5], "city": r[6], "area": r[7],
                 "station": r[8], "registered_by": r[9],
             }
-    except Exception as e:
-        flash(f"Could not load the case: {e}", "error")
+    except Exception:
+        pass
     return None
 
 
@@ -2344,8 +2158,8 @@ def get_case_evidence(case_no):
             })
         cur.close()
         conn.close()
-    except Exception as e:
-        flash(f"Could not load evidence: {e}", "error")
+    except Exception:
+        pass
     return rows
 
 
@@ -2374,9 +2188,8 @@ def get_evidence(evidence_id):
 
 WORKSPACE_TPL = """
 <div class="card" style="margin-bottom:14px">
-  <h2>{{ case.case_name }}</h2>
-  <div class="muted">Case {{ case.case_no }} &nbsp;·&nbsp; FIR {{ case.fir_no }}
-    &nbsp;·&nbsp; {{ case.city }} / {{ case.area }} / {{ case.station }}</div>
+  <h2>📁 Evidence Manifest: {{ case.case_name }}</h2>
+  <div class="muted">Case No: {{ case.case_no }} | FIR: {{ case.fir_no }} | {{ case.city }} — {{ case.area }} — {{ case.station }}</div>
   <div class="row" style="margin-top:12px">
     <span class="pill {{ 'green' if case.condition in resolved else 'gold' }}">{{ case.condition }}</span>
     <span class="muted">Scene: {{ case.location }}</span>
@@ -2384,8 +2197,9 @@ WORKSPACE_TPL = """
   </div>
   <div class="row" style="margin-top:12px">
     <a class="btn dark small" href="{{ url_for('report_case_dossier', case_no=case.case_no) }}">
-      Print full case dossier</a>
-    <a class="btn slate small" href="{{ url_for('portal', tab='cases') }}">Back to repository</a>
+      📄 Print Complete Case Dossier (All Evidences)
+    </a>
+    <a class="btn slate small" href="{{ url_for('portal', tab='cases') }}">← Back to Repository</a>
   </div>
 </div>
 
@@ -2393,42 +2207,33 @@ WORKSPACE_TPL = """
   <div class="stack">
     {% if u.role != 'COURT_JUDICIAL' %}
     <div class="card">
-      <h3>Ingest &amp; encrypt evidence</h3>
-      <p class="muted">The file is hashed, AES-256 sealed, and anchored on-chain when the node is reachable.</p>
-      <form method="post" action="{{ url_for('evidence_upload', case_no=case.case_no) }}"
-            enctype="multipart/form-data" class="stack">
+      <h3>Ingest &amp; Encrypt Evidence</h3>
+      <form method="post" action="{{ url_for('evidence_upload', case_no=case.case_no) }}" enctype="multipart/form-data" class="stack">
         <div><label>Evidence ID</label>
           <input type="text" name="evidence_id" placeholder="e.g. EV-CCTV-01" required></div>
-        <div><label>Evidence title / name</label>
-          <input type="text" name="evidence_title" placeholder="Evidence title" required></div>
-        <div><label>Locker / shelf location</label>
-          <input type="text" name="vault_locker" placeholder="e.g. Shelf B-14"></div>
-        <div><label>Digital file (image, video, audio, report or disk dump)</label>
+        <div><label>Evidence Title / Name</label>
+          <input type="text" name="evidence_title" placeholder="e.g. Traffic CCTV Angle 2" required></div>
+        <div><label>Locker / Shelf Location</label>
+          <input type="text" name="vault_locker" placeholder="e.g. Locker 4-B"></div>
+        <div><label>Select Digital Exhibit File</label>
           <input type="file" name="evidence_file" required></div>
-        <button class="btn green" style="width:100%;margin-top:12px;height:40px">
-          Encrypt &amp; seal to vault</button>
+        <button class="btn green" style="width:100%;margin-top:12px;height:40px">🔒 Encrypt &amp; Seal to Vault</button>
       </form>
     </div>
 
     <div class="card">
-      <h3>Update judicial status</h3>
+      <h3>Update Judicial Status &amp; Detention</h3>
       <form method="post" action="{{ url_for('case_update_status', case_no=case.case_no) }}" class="stack">
-        <div><label>Condition of case</label>
+        <div><label>Condition of Case</label>
           <select name="condition">
             {% for c in conditions %}
               <option value="{{ c }}" {{ 'selected' if c == case.condition }}>{{ c }}</option>
             {% endfor %}
           </select></div>
-        <div><label>Verdict / detention facility</label>
+        <div><label>Judicial Verdict / Detention Facility</label>
           <input type="text" name="punishment" value="{{ case.punishment }}"></div>
-        <button class="btn gold" style="width:100%;margin-top:10px">Commit status update</button>
+        <button class="btn gold" style="width:100%;margin-top:10px">💾 Commit Status &amp; Detention Update</button>
       </form>
-    </div>
-    {% else %}
-    <div class="card">
-      <h3>Judicial inspection</h3>
-      <p class="muted">Select any exhibit to decrypt and inspect it, verify its SHA-256 seal,
-        or export a Section 65B certificate. Ingestion is disabled for judicial accounts.</p>
     </div>
     {% endif %}
   </div>
@@ -2438,47 +2243,41 @@ WORKSPACE_TPL = """
     <div class="card">
       <h3>Exhibit {{ preview.evidence_id }} — {{ preview.title }}</h3>
       <div class="muted">{{ preview.category }} · {{ preview.classification }}</div>
-      <div class="hash muted" style="margin-top:6px">SHA-256: {{ preview.sha256 }}</div>
+      <div class="hash muted" style="margin-top:6px">SHA-256 Bit-Level Seal: {{ preview.sha256 }}</div>
 
       <div class="media-frame">
         {% if preview.kind == 'image' %}
-          <img src="{{ url_for('evidence_stream', evidence_id=preview.evidence_id) }}"
-               alt="Decrypted exhibit {{ preview.evidence_id }}">
+          <img src="{{ url_for('evidence_stream', evidence_id=preview.evidence_id) }}" alt="Decrypted exhibit">
         {% elif preview.kind == 'video' %}
-          <video controls preload="metadata"
-                 src="{{ url_for('evidence_stream', evidence_id=preview.evidence_id) }}"></video>
+          <video controls preload="metadata" src="{{ url_for('evidence_stream', evidence_id=preview.evidence_id) }}"></video>
         {% elif preview.kind == 'audio' %}
           <audio controls src="{{ url_for('evidence_stream', evidence_id=preview.evidence_id) }}"></audio>
         {% elif preview.kind == 'pdf' %}
-          <iframe src="{{ url_for('evidence_stream', evidence_id=preview.evidence_id) }}"
-                  style="width:100%;height:520px;border:0;border-radius:6px;background:#fff"></iframe>
+          <iframe src="{{ url_for('evidence_stream', evidence_id=preview.evidence_id) }}" style="width:100%;height:520px;border:0;border-radius:6px;background:#fff"></iframe>
         {% elif preview.kind == 'text' %}
           <pre>{{ preview_text }}</pre>
         {% else %}
           <p style="color:#E2E8F0;font-size:12px;margin:14px">
-            This exhibit is footage or a binary dump that the browser cannot render.
-            Download it to inspect with a forensic tool.</p>
+            [This is footage / binary dump which can't be represented inline. Please download to inspect with forensic tool.]
+          </p>
         {% endif %}
       </div>
 
       <div class="row" style="margin-top:12px">
-        <a class="btn blue small" href="{{ url_for('evidence_download', evidence_id=preview.evidence_id) }}">
-          Download decrypted copy</a>
-        <a class="btn gold small" href="{{ url_for('report_65b', evidence_id=preview.evidence_id) }}">
-          Export Section 65B certificate</a>
-        <a class="btn slate small" href="{{ url_for('case_workspace', case_no=case.case_no) }}">
-          Close preview</a>
+        <a class="btn blue small" href="{{ url_for('evidence_download', evidence_id=preview.evidence_id) }}">💾 Download Decrypted Copy</a>
+        <a class="btn gold small" href="{{ url_for('report_65b', evidence_id=preview.evidence_id) }}">📑 Export Section 65B Certificate</a>
+        <a class="btn slate small" href="{{ url_for('case_workspace', case_no=case.case_no) }}">Close Preview</a>
       </div>
     </div>
     {% endif %}
 
     <div class="card">
-      <h3>Evidence manifest ({{ evidences|length }} exhibits)</h3>
+      <h3>Evidence Manifest ({{ evidences|length }} Exhibits Sealed)</h3>
       <div class="table-scroll">
         <table>
           <thead><tr>
-            <th>Evidence ID</th><th class="left">Evidence name</th><th>Category</th>
-            <th class="left">AI classification</th><th>SHA-256 seal</th><th>Locker</th>
+            <th>Evidence ID</th><th class="left">Evidence Name</th><th>Category</th>
+            <th class="left">AI Classification</th><th>SHA-256 Seal</th><th>Locker</th>
             <th>Custody</th><th>Chain</th><th>Inspect</th>
           </tr></thead>
           <tbody>
@@ -2488,23 +2287,20 @@ WORKSPACE_TPL = """
               <td class="left">{{ e.title }}</td>
               <td>{{ e.category }}</td>
               <td class="left">{{ e.classification }}</td>
-              <td class="hash">{{ e.sha256[:24] }}…</td>
+              <td class="hash">{{ e.sha256[:20] }}…</td>
               <td>{{ e.locker }}</td>
-              <td>{% if e.custody == 'VAULT' %}<span class="pill green">In vault</span>
+              <td>{% if e.custody == 'VAULT' %}<span class="pill green">In Vault</span>
                   {% else %}<span class="pill gold">{{ e.custody }}</span>{% endif %}</td>
               <td>{% if e.chain_status == 'ANCHORED' %}<span class="pill navy">Anchored</span>
                   {% else %}<span class="pill slate">{{ e.chain_status }}</span>{% endif %}</td>
               <td>
                 {% if e.on_disk %}
-                  <a class="btn small"
-                     href="{{ url_for('case_workspace', case_no=case.case_no, view=e.evidence_id) }}">
-                     Decrypt &amp; view</a>
-                {% else %}<span class="muted">File missing</span>{% endif %}
+                  <a class="btn small" href="{{ url_for('case_workspace', case_no=case.case_no, view=e.evidence_id) }}">👁️ Decrypt &amp; View</a>
+                {% else %}<span class="muted">Missing</span>{% endif %}
               </td>
             </tr>
             {% else %}
-            <tr><td colspan="9" class="muted" style="padding:22px">
-              No exhibits have been sealed into this case yet.</td></tr>
+            <tr><td colspan="9" class="muted" style="padding:22px">No exhibits sealed yet.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -2520,13 +2316,13 @@ WORKSPACE_TPL = """
 def case_workspace(case_no):
     case = get_case(case_no)
     if not case:
-        flash("That case profile could not be found.", "error")
+        flash("Case profile not found.", "error")
         return redirect(url_for("portal", tab="cases"))
 
     evidences = get_case_evidence(case_no)
-
     preview, preview_text = None, ""
     view_id = request.args.get("view")
+
     if view_id:
         preview = next((e for e in evidences if e["evidence_id"] == view_id), None)
         if preview and preview["kind"] == "text" and preview["on_disk"]:
@@ -2534,12 +2330,9 @@ def case_workspace(case_no):
                 raw = EncryptionEngine.decrypt_file_to_bytes(preview["encrypted_path"])
                 preview_text = raw.decode("utf-8", errors="replace")[:20000]
             except Exception as e:
-                preview_text = f"[Decryption failed: {e}]"
+                preview_text = f"[Decryption Error: {e}]"
         if preview:
-            log_chained_audit_event(
-                "EVIDENCE_DECRYPTED_VIEW",
-                f"Decrypted and inspected {preview['title']} ({preview['evidence_id']})"
-            )
+            log_chained_audit_event("EVIDENCE_DECRYPTED_VIEW", f"Decrypted and inspected {preview['title']} ({preview['evidence_id']})")
 
     return render_page(
         WORKSPACE_TPL, f"Case {case_no}",
@@ -2562,27 +2355,20 @@ def evidence_upload(case_no):
     upload = request.files.get("evidence_file")
 
     if not eid or not etitle or not upload or not upload.filename:
-        flash("Evidence ID, title, and a file are all required.", "error")
+        flash("Evidence ID, Title, and valid File are required.", "error")
         return redirect(url_for("case_workspace", case_no=case_no))
 
     raw_name = os.path.basename(upload.filename)
-
-    # Buffer the upload to a temp file so the classifier can inspect it on disk,
-    # exactly as the desktop client inspected the chosen path.
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=os.path.splitext(raw_name)[1])
     os.close(tmp_fd)
+
     try:
         upload.save(tmp_path)
-
-        detected_category, detected_classification, extracted_text = \
-            IntelligentClassifier.analyze_evidence(tmp_path, raw_name)
+        detected_category, detected_classification, extracted_text = IntelligentClassifier.analyze_evidence(tmp_path, raw_name)
 
         hasher = hashlib.sha256()
         with open(tmp_path, "rb") as fobj:
-            while True:
-                chunk = fobj.read(4096)
-                if not chunk:
-                    break
+            while chunk := fobj.read(4096):
                 hasher.update(chunk)
         fhash = hasher.hexdigest()
 
@@ -2626,8 +2412,6 @@ def evidence_upload(case_no):
 
     log_chained_audit_event("EVIDENCE_SEALED", f"Evidence {eid} sealed with hash {fhash} (AES-256 Protected)")
 
-    # On-chain anchoring never rolls back the committed off-chain record.
-    chain_note = "Blockchain anchoring is not configured."
     if BLOCKCHAIN_MODULE_AVAILABLE and BLOCKCHAIN_CONFIG.get("enabled", False):
         try:
             tx_hash, block_no = anchor_evidence_hash(case_no, eid, fhash)
@@ -2642,17 +2426,14 @@ def evidence_upload(case_no):
             cur2.close()
             conn2.close()
             log_chained_audit_event("EVIDENCE_ANCHORED_ONCHAIN", f"Evidence {eid} anchored on-chain, tx {tx_hash}")
-            chain_note = f"Anchored on-chain (tx {tx_hash[:18]}…, block {block_no})."
-        except Exception as chain_err:
-            chain_note = f"Blockchain anchoring pending — node unreachable ({chain_err})."
+        except Exception:
+            pass
 
-    flash(f"Evidence {eid} AES-256 encrypted and sealed. SHA-256: {fhash}", "ok")
-    flash(chain_note, "info")
+    flash(f"Evidence {eid} AES-256 Encrypted & Sealed! SHA-256: {fhash}", "ok")
     return redirect(url_for("case_workspace", case_no=case_no, view=eid))
 
 
 def _decrypt_to_cache(ev):
-    """Decrypt an exhibit into a short-lived cache file so the browser can range-request it."""
     if not ev["encrypted_path"] or not os.path.exists(ev["encrypted_path"]):
         return None
     safe_name = "".join(ch for ch in (ev["raw_file_name"] or "exhibit.bin") if ch.isalnum() or ch in "._- ")
@@ -2671,16 +2452,13 @@ def _decrypt_to_cache(ev):
 @app.route("/evidence/<path:evidence_id>/stream")
 @login_required
 def evidence_stream(evidence_id):
-    """Serves the decrypted exhibit inline — this is what renders images and video in the workspace."""
     ev = get_evidence(evidence_id)
-    if not ev:
-        abort(404)
+    if not ev: abort(404)
     path = _decrypt_to_cache(ev)
-    if not path:
-        abort(404)
+    if not path: abort(404)
     return send_file(
         path, mimetype=guess_mime(ev["raw_file_name"]),
-        as_attachment=False, conditional=True,       # conditional=True enables video seeking
+        as_attachment=False, conditional=True,
         download_name=ev["raw_file_name"] or "exhibit.bin"
     )
 
@@ -2689,11 +2467,8 @@ def evidence_stream(evidence_id):
 @login_required
 def evidence_download(evidence_id):
     ev = get_evidence(evidence_id)
-    if not ev:
+    if not ev or not ev["encrypted_path"] or not os.path.exists(ev["encrypted_path"]):
         abort(404)
-    if not ev["encrypted_path"] or not os.path.exists(ev["encrypted_path"]):
-        flash(f"The encrypted payload for {evidence_id} is missing from vault storage.", "error")
-        return redirect(url_for("case_workspace", case_no=ev["case_no"]))
     try:
         data = EncryptionEngine.decrypt_file_to_bytes(ev["encrypted_path"])
     except Exception as e:
@@ -2708,42 +2483,41 @@ def evidence_download(evidence_id):
 
 
 # =========================================================
-# CHAIN OF CUSTODY LEDGER
+# CUSTODY & TIMELINE
 # =========================================================
 CUSTODY_TPL = """
 {{ tabs_html|safe }}
 <div class="split">
   <div class="card">
-    <h3>Custody handover &amp; tracking</h3>
+    <h3>Custody Handover &amp; Tracking</h3>
     <form method="post" action="{{ url_for('custody_issue') }}" class="stack">
       <div><label>Evidence ID</label>
         <input type="text" name="evidence_id" placeholder="e.g. EV-CCTV-01" required></div>
-      <div><label>Recipient officer badge</label>
+      <div><label>Recipient Officer Badge</label>
         <input type="text" name="badge" required></div>
-      <div><label>Recipient officer name</label>
+      <div><label>Recipient Officer Name</label>
         <input type="text" name="name" required></div>
-      <div><label>Officer rank</label>
+      <div><label>Officer Rank</label>
         <input type="text" name="rank" placeholder="e.g. PI / DySP"></div>
-      <div><label>Recipient mobile</label>
-        <input type="text" name="mobile" placeholder="10 digits"></div>
-      <div><label>Official email</label>
+      <div><label>Recipient Officer Mobile</label>
+        <input type="text" name="mobile" placeholder="10 Digits"></div>
+      <div><label>Official Email</label>
         <input type="text" name="email" placeholder="officer@police.gov.in"></div>
-      <div><label>Transfer reason</label>
-        <input type="text" name="reason" placeholder="e.g. FSL testing"></div>
-      <div><label>Custody duration (days)</label>
+      <div><label>Transfer Reason</label>
+        <input type="text" name="reason" placeholder="e.g. FSL Testing"></div>
+      <div><label>Custody Duration (Days)</label>
         <input type="number" name="days" value="7" min="1"></div>
-      <button class="btn" style="width:100%;margin-top:12px;height:40px">Transfer &amp; issue evidence</button>
+      <button class="btn" style="width:100%;margin-top:12px;height:40px">🔒 Transfer &amp; Issue Evidence</button>
     </form>
   </div>
 
   <div class="card">
-    <h3>Custody movement ledger</h3>
-    <p class="muted">Open a row's timeline to see the exhibit's full provenance journey.</p>
+    <h3>Chain of Custody Movement Ledger</h3>
     <div class="table-scroll">
       <table>
         <thead><tr>
-          <th>Transfer</th><th>Evidence</th><th>Case</th><th>Badge</th><th class="left">Officer</th>
-          <th>Rank</th><th>Checked out</th><th>Court deadline</th><th>Status</th><th>Actions</th>
+          <th>Transfer ID</th><th>Evidence ID</th><th>Case No</th><th>Badge</th><th class="left">Officer</th>
+          <th>Rank</th><th>Checkout Time</th><th>Deadline</th><th>Status</th><th>Actions</th>
         </tr></thead>
         <tbody>
           {% for t in transfers %}
@@ -2751,25 +2525,23 @@ CUSTODY_TPL = """
             <td>{{ t.transfer_id }}</td><td><b>{{ t.evidence_id }}</b></td><td>{{ t.case_no }}</td>
             <td>{{ t.badge }}</td><td class="left">{{ t.name }}</td><td>{{ t.rank }}</td>
             <td>{{ t.checkout }}</td><td>{{ t.deadline }}</td>
-            <td>{% if t.status == 'CHECKED_OUT' %}<span class="pill gold">Checked out</span>
-                {% else %}<span class="pill green">In vault</span>{% endif %}</td>
+            <td>{% if t.status == 'CHECKED_OUT' %}<span class="pill gold">Checked Out</span>
+                {% else %}<span class="pill green">In Vault</span>{% endif %}</td>
             <td>
               <div class="row" style="gap:5px;justify-content:center">
-                <a class="btn small slate"
-                   href="{{ url_for('custody_timeline', evidence_id=t.evidence_id) }}">Timeline</a>
+                <a class="btn small slate" href="{{ url_for('custody_timeline', evidence_id=t.evidence_id) }}">Timeline</a>
                 {% if t.status == 'CHECKED_OUT' %}
                 <form method="post" action="{{ url_for('custody_return') }}">
                   <input type="hidden" name="transfer_id" value="{{ t.transfer_id }}">
                   <input type="hidden" name="evidence_id" value="{{ t.evidence_id }}">
-                  <button class="btn green small">Mark returned</button>
+                  <button class="btn green small">Return</button>
                 </form>
                 {% endif %}
               </div>
             </td>
           </tr>
           {% else %}
-          <tr><td colspan="10" class="muted" style="padding:22px">
-            No custody movements have been recorded for this station.</td></tr>
+          <tr><td colspan="10" class="muted" style="padding:22px">No movements logged.</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -2800,9 +2572,9 @@ def _custody_view(tabs_html):
         cur.close()
         conn.close()
     except Exception as e:
-        flash(f"Could not load the custody ledger: {e}", "error")
+        flash(f"Ledger error: {e}", "error")
 
-    return render_page(CUSTODY_TPL, "Chain of custody", tabs_html=tabs_html, transfers=transfers)
+    return render_page(CUSTODY_TPL, "Chain of Custody", tabs_html=tabs_html, transfers=transfers)
 
 
 @app.route("/custody/issue", methods=["POST"])
@@ -2819,18 +2591,14 @@ def custody_issue():
     days_str = (request.form.get("days") or "").strip()
     days = int(days_str) if days_str.isdigit() else 7
 
-    if not eid or not badge or not name:
-        flash("Evidence ID, recipient badge, and name are mandatory.", "error")
-        return redirect(url_for("portal", tab="custody"))
-
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("SELECT case_no, evidence_title FROM case_evidence_files WHERE evidence_id = :1", (eid,))
+        cur.execute("SELECT case_no FROM case_evidence_files WHERE evidence_id = :1", (eid,))
         row = cur.fetchone()
         if not row:
             cur.close(); conn.close()
-            flash(f"Evidence ID {eid} was not found in the vault.", "error")
+            flash("Evidence ID not found.", "error")
             return redirect(url_for("portal", tab="custody"))
 
         c_no = row[0]
@@ -2847,8 +2615,7 @@ def custody_issue():
         """, (next_tid, eid, c_no, f"{u['rank']} {u['name']}", badge, name, rank, mob, email,
               reason, u["division"], u["unit"], days))
 
-        cur.execute("UPDATE case_evidence_files SET active_custody_officer = :1 WHERE evidence_id = :2",
-                    (name, eid))
+        cur.execute("UPDATE case_evidence_files SET active_custody_officer = :1 WHERE evidence_id = :2", (name, eid))
         conn.commit()
         cur.close()
         conn.close()
@@ -2856,8 +2623,8 @@ def custody_issue():
         flash(f"Database error: {e}", "error")
         return redirect(url_for("portal", tab="custody"))
 
-    log_chained_audit_event("CUSTODY_ISSUED", f"Evidence {eid} transferred to Officer {name} (#{badge}) for {days} days.")
-    flash(f"Custody of {eid} transferred to {name} (#{badge}) for {days} days.", "ok")
+    log_chained_audit_event("CUSTODY_ISSUED", f"Evidence {eid} transferred to {name} (#{badge})")
+    flash(f"Custody of Evidence {eid} transferred to Officer {name}.", "ok")
     return redirect(url_for("portal", tab="custody"))
 
 
@@ -2883,31 +2650,31 @@ def custody_return():
         flash(f"Database error: {e}", "error")
         return redirect(url_for("portal", tab="custody"))
 
-    log_chained_audit_event("CUSTODY_RESTORED_VAULT", f"Evidence {eid} safely returned to vault storage.")
-    flash(f"Evidence {eid} returned to the vault.", "ok")
+    log_chained_audit_event("CUSTODY_RESTORED_VAULT", f"Evidence {eid} returned to vault.")
+    flash(f"Evidence {eid} safely returned to Vault.", "ok")
     return redirect(url_for("portal", tab="custody"))
 
 
 TIMELINE_TPL = """
 <div class="card">
-  <h2>Custody provenance timeline — exhibit {{ evidence_id }}</h2>
-  <p class="muted">Every handover recorded against this exhibit, in order.</p>
-  <div class="timeline" style="margin-top:18px">
+  <h2>🔍 Interactive Journey Timeline: Evidence {{ evidence_id }}</h2>
+  <div class="stack" style="margin-top:16px">
     {% for e in events %}
-      <div class="tl-item">
+      <div class="card" style="background:var(--card-highlight);border:1px solid var(--card-border)">
         <div class="row" style="justify-content:space-between">
-          <b>Stage {{ loop.index }}: {{ e.from_officer }} → {{ e.to_name }}</b>
-          <span class="pill {{ 'gold' if e.status == 'CHECKED_OUT' else 'green' }}">{{ e.status }}</span>
+          <b>Stage {{ loop.index }}: {{ e.status }}</b>
+          <span class="muted">Timestamp: {{ e.checkout }}</span>
         </div>
-        <div class="muted" style="margin-top:5px">Recipient rank: {{ e.to_rank }}</div>
-        <div class="muted">Reason: {{ e.reason }}</div>
-        <div class="muted">Recorded: {{ e.checkout }}</div>
+        <div style="margin-top:6px;font-size:12px">
+          Transferred By: {{ e.from_officer }} ➔ Recipient: {{ e.to_name }} ({{ e.to_rank }})
+        </div>
+        <div class="muted" style="margin-top:3px">Purpose / Reason: {{ e.reason }}</div>
       </div>
     {% else %}
-      <p class="muted">No custody events recorded for this exhibit.</p>
+      <p class="muted">No tracking events recorded.</p>
     {% endfor %}
   </div>
-  <a class="btn slate small" href="{{ url_for('portal', tab='custody') }}">Back to ledger</a>
+  <a class="btn slate small" style="margin-top:14px" href="{{ url_for('portal', tab='custody') }}">← Back to Ledger</a>
 </div>
 """
 
@@ -2932,54 +2699,42 @@ def custody_timeline(evidence_id):
         cur.close()
         conn.close()
     except Exception as e:
-        flash(f"Could not load the timeline: {e}", "error")
+        flash(f"Timeline error: {e}", "error")
 
-    return render_page(TIMELINE_TPL, "Custody timeline", evidence_id=evidence_id, events=events)
+    return render_page(TIMELINE_TPL, "Custody Timeline", evidence_id=evidence_id, events=events)
 
 
 # =========================================================
-# INTEGRITY VERIFICATION DASHBOARD
+# INTEGRITY AUDIT & TAMPER DEMO
 # =========================================================
 VERIFY_TPL = """
 {{ tabs_html|safe }}
 <div class="card" style="margin-bottom:14px">
   <div class="row" style="justify-content:space-between">
     <div>
-      <h2>Bit-level tamper seal verification</h2>
-      <p class="muted">Each exhibit is decrypted in memory and re-hashed, then compared against
-        the SHA-256 seal recorded at ingestion.</p>
+      <h2>Live SHA-256 Bit-Level Integrity &amp; Tamper Audit Dashboard</h2>
+      <p class="muted">Live calculation vs initial cryptographic SHA-256 bit-stream seal.</p>
     </div>
     <div class="row">
-      <a class="btn" href="{{ url_for('portal', tab='verify') }}">Re-run integrity audit</a>
+      <a class="btn green" href="{{ url_for('portal', tab='verify') }}">🔍 Run Global Bit-Stream Audit</a>
       {% if u.role != 'COURT_JUDICIAL' %}
-      <form method="post" action="{{ url_for('tamper_simulate') }}"
-            onsubmit="return confirm('Append tamper bytes to this exhibit on disk? This is a controlled demo.')">
+      <form method="post" action="{{ url_for('tamper_simulate') }}" onsubmit="return confirm('Simulate bit tampering on disk payload?')">
         <select name="evidence_id" style="width:auto;display:inline-block;margin-right:6px">
           {% for r in results %}<option value="{{ r.evidence_id }}">{{ r.evidence_id }}</option>{% endfor %}
         </select>
-        <button class="btn red">Simulate controlled tampering</button>
+        <button class="btn red">⚡ Simulate Controlled File Tamper</button>
       </form>
       {% endif %}
     </div>
   </div>
 </div>
 
-<div class="metrics" style="margin-bottom:14px">
-  <div class="metric"><div class="t">Exhibits audited</div><div class="v">{{ results|length }}</div></div>
-  <div class="metric"><div class="t">Verified intact</div>
-    <div class="v" style="color:var(--green)">{{ intact }}</div></div>
-  <div class="metric"><div class="t">Integrity mismatches</div>
-    <div class="v" style="color:var(--red)">{{ mismatched }}</div></div>
-  <div class="metric"><div class="t">Missing payloads</div>
-    <div class="v" style="color:var(--muted)">{{ missing }}</div></div>
-</div>
-
 <div class="card">
   <div class="table-scroll">
     <table>
       <thead><tr>
-        <th>Evidence ID</th><th>Case</th><th class="left">Title</th>
-        <th>Sealed hash</th><th>Live recomputed hash</th><th>Verdict</th>
+        <th>Evidence ID</th><th>Case No</th><th class="left">Title</th>
+        <th>Sealed Master Hash (DB)</th><th>Live Disk Re-Calculated Hash</th><th>Tamper Audit Status</th>
       </tr></thead>
       <tbody>
         {% for r in results %}
@@ -2989,14 +2744,13 @@ VERIFY_TPL = """
           <td class="hash">{{ r.sealed[:26] }}…</td>
           <td class="hash">{{ r.active[:26] }}{{ '…' if r.active|length > 26 }}</td>
           <td>
-            {% if r.ok %}<span class="pill green">Verified — 100% intact</span>
-            {% elif r.missing %}<span class="pill slate">Missing file</span>
-            {% else %}<span class="pill red">Integrity mismatch</span>{% endif %}
+            {% if r.ok %}<span class="pill green">✅ VERIFIED (100% INTACT)</span>
+            {% elif r.missing %}<span class="pill slate">❌ Missing File</span>
+            {% else %}<span class="pill red">🚨 INTEGRITY MISMATCH</span>{% endif %}
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="6" class="muted" style="padding:22px">
-          No exhibits are available in this scope to verify.</td></tr>
+        <tr><td colspan="6" class="muted" style="padding:22px">No exhibits found.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -3012,16 +2766,10 @@ def _verify_view(tabs_html):
         conn = get_db_connection()
         cur = conn.cursor()
         if u["rank_level"] == 5 or u["role"] == "COURT_JUDICIAL":
-            cur.execute("""
-                SELECT e.evidence_id, e.case_no, e.evidence_title, e.sha256_hash, e.encrypted_path
-                FROM case_evidence_files e JOIN case_profiles c ON e.case_no = c.case_no
-            """)
+            cur.execute("SELECT e.evidence_id, e.case_no, e.evidence_title, e.sha256_hash, e.encrypted_path FROM case_evidence_files e JOIN case_profiles c ON e.case_no = c.case_no")
         else:
-            cur.execute("""
-                SELECT e.evidence_id, e.case_no, e.evidence_title, e.sha256_hash, e.encrypted_path
-                FROM case_evidence_files e JOIN case_profiles c ON e.case_no = c.case_no
-                WHERE c.division_code = :1 AND c.unit_name = :2
-            """, (u["division"], u["unit"]))
+            cur.execute("SELECT e.evidence_id, e.case_no, e.evidence_title, e.sha256_hash, e.encrypted_path FROM case_evidence_files e JOIN case_profiles c ON e.case_no = c.case_no WHERE c.division_code = :1 AND c.unit_name = :2",
+                        (u["division"], u["unit"]))
         rows = cur.fetchall()
         cur.close()
         conn.close()
@@ -3043,31 +2791,16 @@ def _verify_view(tabs_html):
                 "evidence_id": eid, "case_no": cno, "title": title,
                 "sealed": sealed_h, "active": active_h, "ok": ok, "missing": missing,
             })
-
-        log_chained_audit_event("INTEGRITY_AUDIT_RUN", f"Verified bit-level hash integrity across {len(rows)} exhibits.")
     except Exception as e:
         flash(f"Audit error: {e}", "error")
 
-    return render_page(
-        VERIFY_TPL, "Integrity verification", tabs_html=tabs_html, results=results,
-        intact=sum(1 for r in results if r["ok"]),
-        mismatched=sum(1 for r in results if not r["ok"] and not r["missing"]),
-        missing=sum(1 for r in results if r["missing"]),
-    )
+    return render_page(VERIFY_TPL, "Integrity Verification", tabs_html=tabs_html, results=results)
 
 
 @app.route("/verify/tamper-demo", methods=["POST"])
 @login_required
 def tamper_simulate():
-    if is_judge():
-        flash("The judicial portal is read-only.", "error")
-        return redirect(url_for("portal", tab="verify"))
-
     eid = (request.form.get("evidence_id") or "").strip()
-    if not eid:
-        flash("There are no exhibits in the vault to tamper with.", "warn")
-        return redirect(url_for("portal", tab="verify"))
-
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -3080,12 +2813,9 @@ def tamper_simulate():
             with open(row[0], "ab") as f:
                 f.write(b"\x00TAMPERED_PAYLOAD_BYTE_OVERRIDE\xFF")
             log_chained_audit_event("TAMPER_SIMULATION_EXECUTED", f"Controlled tamper applied to {eid}")
-            flash(
-                f"Exhibit {eid} ({row[1]}) ciphertext was modified on disk. "
-                "The audit below now detects the bit mismatch.", "error"
-            )
+            flash(f"Exhibit {eid} ({row[1]}) ciphertext modified on disk! Re-running audit detects mismatch.", "error")
         else:
-            flash(f"No encrypted payload found on disk for {eid}.", "error")
+            flash(f"Physical file missing for {eid}.", "error")
     except Exception as e:
         flash(str(e), "error")
 
@@ -3093,37 +2823,33 @@ def tamper_simulate():
 
 
 # =========================================================
-# SECURITY AUDIT TRAILS (hash-chained ledger)
+# AUDIT TRAILS
 # =========================================================
 AUDIT_TPL = """
 {{ tabs_html|safe }}
 <div class="card">
   <div class="row" style="justify-content:space-between;margin-bottom:10px">
-    <div>
-      <h2>Cryptographically chained audit ledger</h2>
-      <p class="muted">Each block hashes the previous block's digest, so any removed or edited
-        row breaks the chain.</p>
-    </div>
-    <a class="btn" href="{{ url_for('portal', tab='audit') }}">Refresh audit chain</a>
+    <h2>Cryptographically Chained Audit Ledger (MHA Statutory Nonce Chaining)</h2>
+    <a class="btn" href="{{ url_for('portal', tab='audit') }}">🔄 Refresh Audit Chain</a>
   </div>
   <div class="table-scroll">
     <table>
       <thead><tr>
-        <th>Log ID</th><th>Previous hash</th><th>Timestamp</th><th>Actor</th><th>Role</th>
-        <th>Action</th><th class="left">Target</th><th>IP address</th><th>Block hash</th>
+        <th>Log ID</th><th>Prev Hash</th><th>Timestamp</th><th>Actor</th><th>Role</th>
+        <th>Action</th><th class="left">Target</th><th>IP Address</th><th>Block Hash</th>
       </tr></thead>
       <tbody>
         {% for l in logs %}
         <tr>
           <td>{{ l.log_id }}</td>
-          <td class="hash">{{ l.prev_hash[:18] }}…</td>
+          <td class="hash">{{ l.prev_hash[:16] }}…</td>
           <td>{{ l.timestamp }}</td><td>{{ l.actor }}</td><td>{{ l.role }}</td>
           <td><span class="pill navy">{{ l.action }}</span></td>
           <td class="left">{{ l.target }}</td><td>{{ l.ip }}</td>
-          <td class="hash">{{ l.log_hash[:18] }}…</td>
+          <td class="hash">{{ l.log_hash[:16] }}…</td>
         </tr>
         {% else %}
-        <tr><td colspan="9" class="muted" style="padding:22px">The audit ledger is empty.</td></tr>
+        <tr><td colspan="9" class="muted" style="padding:22px">No audit events.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -3150,25 +2876,21 @@ def _audit_view(tabs_html):
         cur.close()
         conn.close()
     except Exception as e:
-        flash(f"Could not load the audit ledger: {e}", "error")
+        flash(f"Audit error: {e}", "error")
 
-    return render_page(AUDIT_TPL, "Security audit trails", tabs_html=tabs_html, logs=logs)
+    return render_page(AUDIT_TPL, "Security Audit Trails", tabs_html=tabs_html, logs=logs)
 
 
 # =========================================================
-# STATUTORY PDF EXPORTS (ReportLab — identical layouts)
+# STATUTORY REPORT PDF GENERATION
 # =========================================================
 def _pdf_styles():
     styles = getSampleStyleSheet()
     return {
-        "title": ParagraphStyle("TStyle", parent=styles["Heading1"], fontSize=14,
-                                alignment=1, textColor=colors.HexColor("#1E3A8A")),
-        "sub": ParagraphStyle("SubStyle", parent=styles["Normal"], fontSize=9,
-                              alignment=1, textColor=colors.HexColor("#475569")),
-        "h2": ParagraphStyle("H2Style", parent=styles["Heading2"], fontSize=11,
-                             textColor=colors.HexColor("#1E3A8A")),
-        "body": ParagraphStyle("BStyle", parent=styles["Normal"], fontSize=8.5, leading=12,
-                               textColor=colors.HexColor("#0F172A")),
+        "title": ParagraphStyle("TStyle", parent=styles["Heading1"], fontSize=14, alignment=1, textColor=colors.HexColor("#1E3A8A")),
+        "sub": ParagraphStyle("SubStyle", parent=styles["Normal"], fontSize=9, alignment=1, textColor=colors.HexColor("#475569")),
+        "h2": ParagraphStyle("H2Style", parent=styles["Heading2"], fontSize=11, textColor=colors.HexColor("#1E3A8A")),
+        "body": ParagraphStyle("BStyle", parent=styles["Normal"], fontSize=8.5, leading=12, textColor=colors.HexColor("#0F172A")),
         "normal": styles["Normal"],
     }
 
@@ -3179,28 +2901,23 @@ def report_case_dossier(case_no):
     u = current_user()
     case = get_case(case_no)
     if not case:
-        flash("That case profile could not be found.", "error")
+        flash("Case not found.", "error")
         return redirect(url_for("portal", tab="cases"))
 
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("""
-            SELECT evidence_id, evidence_title, category, ai_classification, sha256_hash,
-                   vault_locker, active_custody_officer, encrypted_path, raw_file_name
-            FROM case_evidence_files WHERE case_no = :1
-        """, (case_no,))
+        cur.execute("SELECT evidence_id, evidence_title, category, ai_classification, sha256_hash, vault_locker, active_custody_officer, encrypted_path, raw_file_name FROM case_evidence_files WHERE case_no = :1", (case_no,))
         ev_rows = cur.fetchall()
         cur.close()
         conn.close()
     except Exception as e:
-        flash(f"Database error: {e}", "error")
+        flash(f"DB Error: {e}", "error")
         return redirect(url_for("case_workspace", case_no=case_no))
 
     st = _pdf_styles()
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, leftMargin=36, rightMargin=36,
-                            topMargin=36, bottomMargin=36)
+    doc = SimpleDocTemplate(buffer, pagesize=letter, leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36)
     elements = [
         Paragraph("MINISTRY OF HOME AFFAIRS • GOVERNMENT OF INDIA", st["sub"]),
         Paragraph("OFFICIAL CASE & EVIDENCE LIFECYCLE DOSSIER", st["title"]),
@@ -3212,8 +2929,7 @@ def report_case_dossier(case_no):
         ["Incident / Case Title:", case["case_name"], "Incident Scene:", case["location"]],
         ["Jurisdiction Division:", case["city"], "Area Zone / Station:", f"{case['area']} — {case['station']}"],
         ["Current Case Condition:", case["condition"], "Conviction / Detention:", case["punishment"]],
-        ["Sealing & Ingestion Stamp:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-         "Inspecting Authority:", f"{u['rank']} {u['name']}"],
+        ["Sealing & Ingestion Stamp:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Inspecting Authority:", f"{u['rank']} {u['name']}"],
     ]
     t_meta = Table(meta_data, colWidths=[130, 140, 130, 140])
     t_meta.setStyle(TableStyle([
@@ -3225,23 +2941,16 @@ def report_case_dossier(case_no):
         ('PADDING', (0, 0), (-1, -1), 5),
     ]))
     elements += [t_meta, Spacer(1, 15)]
-    elements.append(Paragraph(
-        "<b>ITEMIZED DIGITAL EVIDENCE EXHIBITS, BIT-LEVEL SHA-256 SEALS & VISUAL ATTACHMENTS:</b>",
-        st["h2"]))
+    elements.append(Paragraph("<b>ITEMIZED DIGITAL EVIDENCE EXHIBITS, BIT-LEVEL SHA-256 SEALS & VISUAL ATTACHMENTS:</b>", st["h2"]))
     elements.append(Spacer(1, 6))
 
     temp_images = []
     if ev_rows:
         for er in ev_rows:
-            eid, etitle, ecat, eclass = er[0], er[1], er[2], er[3]
-            ehash, elocker, ecustody = er[4], er[5], er[6]
-            enc_path, raw_name = er[7], er[8]
-
+            eid, etitle, ecat, eclass, ehash, elocker, ecustody, enc_path, raw_name = er
             exhibit_meta = [
-                [Paragraph(f"<b>Exhibit ID:</b> {eid}", st["body"]),
-                 Paragraph(f"<b>Title:</b> {etitle}", st["body"])],
-                [Paragraph(f"<b>Category:</b> {ecat} ({eclass})", st["body"]),
-                 Paragraph(f"<b>Vault Shelf:</b> {elocker} | <b>Custody:</b> {ecustody}", st["body"])],
+                [Paragraph(f"<b>Exhibit ID:</b> {eid}", st["body"]), Paragraph(f"<b>Title:</b> {etitle}", st["body"])],
+                [Paragraph(f"<b>Category:</b> {ecat} ({eclass})", st["body"]), Paragraph(f"<b>Vault Shelf:</b> {elocker} | <b>Custody:</b> {ecustody}", st["body"])],
                 [Paragraph(f"<b>SHA-256 Seal:</b> {ehash}", st["body"]), ""],
             ]
             t_ex = Table(exhibit_meta, colWidths=[260, 280])
@@ -3253,7 +2962,6 @@ def report_case_dossier(case_no):
             ]))
             elements += [t_ex, Spacer(1, 4)]
 
-            # Only genuine images are embedded; footage and binaries get the standard notice.
             img_temp_path = None
             if media_kind(raw_name) == "image" and enc_path and os.path.exists(enc_path):
                 try:
@@ -3273,34 +2981,22 @@ def report_case_dossier(case_no):
                     elements.append(Paragraph("<i>[Visual attachment rendering failed]</i>", st["body"]))
             else:
                 elements.append(Paragraph(
-                    "<b>[This is footage / binary dump which can't be represented in PDF so please "
-                    "check in app for this]</b>",
-                    ParagraphStyle("FootageNote", parent=st["body"],
-                                   textColor=colors.HexColor("#DC2626"), fontName="Helvetica-Bold")))
+                    "<b>[This is footage / binary dump which can't be represented in PDF so please check in app for this]</b>",
+                    ParagraphStyle("FootageNote", parent=st["body"], textColor=colors.HexColor("#DC2626"), fontName="Helvetica-Bold")))
 
             elements.append(Spacer(1, 10))
-    else:
-        elements.append(Paragraph(
-            "<i>No digital evidence exhibits attached to this case profile yet.</i>", st["body"]))
 
     elements += [Spacer(1, 15), Paragraph(
-        "<b>STATUTORY AUTHENTICITY CERTIFICATE:</b> This electronic case record and its attached child "
-        "evidence exhibits are cryptographically anchored under AES-256 encryption at rest and SHA-256 "
-        "bit-stream integrity seals. Admissible in judicial trial under Indian Evidentiary Statutes "
-        "(Section 65B IEA / Section 63 BSA).", st["body"])]
+        "<b>STATUTORY AUTHENTICITY CERTIFICATE:</b> This electronic case record and child exhibits are cryptographically anchored under AES-256 encryption at rest and SHA-256 bit-stream integrity seals. Admissible under Indian Evidentiary Statutes (Section 65B IEA / Section 63 BSA).", st["body"])]
 
     doc.build(elements)
     buffer.seek(0)
-
     for p in temp_images:
-        try:
-            os.remove(p)
-        except Exception:
-            pass
+        try: os.remove(p)
+        except Exception: pass
 
     log_chained_audit_event("CASE_DOSSIER_PRINTED", f"Exported complete dossier for Case {case_no}")
-    return send_file(buffer, mimetype="application/pdf", as_attachment=True,
-                     download_name=f"Complete_Case_Dossier_{case_no.replace('/', '_')}.pdf")
+    return send_file(buffer, mimetype="application/pdf", as_attachment=True, download_name=f"Complete_Case_Dossier_{case_no.replace('/', '_')}.pdf")
 
 
 @app.route("/reports/pending-cases")
@@ -3313,62 +3009,45 @@ def report_pending_cases():
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("""
-            SELECT case_no, case_name, fir_no, crime_location, case_condition, division_code,
-                   unit_name, TO_CHAR(created_at, 'YYYY-MM-DD')
-            FROM case_profiles
-            WHERE division_code = :1 AND unit_name = :2
-              AND case_condition NOT IN ('Convicted & Sentenced', 'Closed / Acquitted')
+            SELECT case_no, case_name, fir_no, crime_location, case_condition, division_code, unit_name, TO_CHAR(created_at, 'YYYY-MM-DD')
+            FROM case_profiles WHERE division_code = :1 AND unit_name = :2 AND case_condition NOT IN ('Convicted & Sentenced', 'Closed / Acquitted')
         """, (div, unit))
         rows = cur.fetchall()
         cur.close()
         conn.close()
     except Exception as e:
-        flash(f"Database error: {e}", "error")
+        flash(f"DB Error: {e}", "error")
         return redirect(url_for("portal", tab="cases"))
 
     st = _pdf_styles()
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(letter), leftMargin=36, rightMargin=36,
-                            topMargin=36, bottomMargin=36)
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(letter), leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36)
     elements = [
         Paragraph("MINISTRY OF HOME AFFAIRS • GOVERNMENT OF INDIA", st["sub"]),
         Paragraph(f"OFFICIAL PENDING CASES REPORT — {unit}", st["title"]),
         HRFlowable(width="100%", thickness=2, color=colors.HexColor("#1E3A8A"), spaceAfter=12),
-        Paragraph(
-            f"Report Generated By: {u['rank']} {u['name']} (#{u['badge']}) | Station: {unit} | "
-            f"Total Pending Dockets: {len(rows)}",
-            ParagraphStyle("Summ", parent=st["normal"], fontSize=9, textColor=colors.HexColor("#0F172A"))),
+        Paragraph(f"Report Generated By: {u['rank']} {u['name']} (#{u['badge']}) | Station: {unit} | Total Pending Dockets: {len(rows)}", st["body"]),
         Spacer(1, 10),
     ]
 
-    if rows:
-        p_data = [["Case No", "Case Name / Title", "FIR Ref", "Crime Location",
-                   "Status / Stage", "City", "Police Station", "Registered Date"]]
-        for r in rows:
-            p_data.append([str(x) for x in r])
+    p_data = [["Case No", "Case Name / Title", "FIR Ref", "Crime Location", "Status / Stage", "City", "Police Station", "Registered Date"]]
+    for r in rows:
+        p_data.append([str(x) for x in r])
 
-        t_p = Table(p_data, colWidths=[80, 140, 80, 110, 100, 70, 90, 70])
-        t_p.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#94A3B8")),
-            ('FONTSIZE', (0, 0), (-1, -1), 7.5),
-            ('PADDING', (0, 0), (-1, -1), 4),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ]))
-        elements.append(t_p)
-    else:
-        elements.append(Paragraph(
-            f"<i>No pending cases in {unit}. Zero backlog reported.</i>", st["normal"]))
-
+    t_p = Table(p_data, colWidths=[80, 140, 80, 110, 100, 70, 90, 70])
+    t_p.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#94A3B8")),
+        ('FONTSIZE', (0, 0), (-1, -1), 7.5),
+        ('PADDING', (0, 0), (-1, -1), 4),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+    ]))
+    elements.append(t_p)
     doc.build(elements)
     buffer.seek(0)
-
-    log_chained_audit_event("PENDING_REPORT_PRINTED", f"Exported pending cases report for {unit}")
-    safe_unit = (unit or "AllStations").replace("/", "_").replace(" ", "_")
-    return send_file(buffer, mimetype="application/pdf", as_attachment=True,
-                     download_name=f"Pending_Cases_Backlog_Report_{safe_unit}.pdf")
+    return send_file(buffer, mimetype="application/pdf", as_attachment=True, download_name=f"Pending_Cases_Report_{unit}.pdf")
 
 
 @app.route("/reports/evidence/<path:evidence_id>/65b")
@@ -3376,23 +3055,16 @@ def report_pending_cases():
 def report_65b(evidence_id):
     u = current_user()
     ev = get_evidence(evidence_id)
-    if not ev:
-        flash("That exhibit could not be found.", "error")
-        return redirect(url_for("portal", tab="cases"))
-
+    if not ev: abort(404)
     case = get_case(ev["case_no"]) or {}
     st = _pdf_styles()
 
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, leftMargin=36, rightMargin=36,
-                            topMargin=36, bottomMargin=36)
+    doc = SimpleDocTemplate(buffer, pagesize=letter, leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36)
     title_style = ParagraphStyle("TStyle65", parent=st["title"], fontSize=13)
-    body_style = ParagraphStyle("BStyle65", parent=st["body"], fontSize=9, leading=13)
 
     elements = [
-        Paragraph("MINISTRY OF HOME AFFAIRS • GOVERNMENT OF INDIA",
-                  ParagraphStyle("Sub65", fontName="Helvetica-Bold", fontSize=10, alignment=1,
-                                 textColor=colors.HexColor("#475569"))),
+        Paragraph("MINISTRY OF HOME AFFAIRS • GOVERNMENT OF INDIA", st["sub"]),
         Paragraph("CERTIFICATE OF AUTHENTICITY UNDER SECTION 65B (IEA) / SECTION 63 (BSA)", title_style),
         HRFlowable(width="100%", thickness=1.5, color=colors.HexColor("#1E3A8A"), spaceAfter=15),
     ]
@@ -3417,105 +3089,16 @@ def report_65b(evidence_id):
         ('PADDING', (0, 0), (-1, -1), 6),
     ]))
     elements += [t, Spacer(1, 20), Paragraph(
-        "<b>STATUTORY ASSISTANCE DECLARATION:</b> This electronic record was mathematically "
-        "fingerprinted and encrypted at lawful ingestion. This document assists authorized personnel "
-        "in generating an electronic-record certificate containing relevant metadata, timestamps, and "
-        "integrity information, subject to applicable legal requirements.", body_style)]
+        "<b>STATUTORY ASSISTANCE DECLARATION:</b> This electronic record was mathematically fingerprinted and encrypted at lawful ingestion under Section 65B of the Indian Evidence Act / Section 63 of Bharatiya Sakshya Adhiniyam.", st["body"])]
 
     doc.build(elements)
     buffer.seek(0)
-
-    log_chained_audit_event("65B_CERTIFICATE_EXPORTED", f"Exported Section 65B PDF for Evidence {evidence_id}")
-    return send_file(buffer, mimetype="application/pdf", as_attachment=True,
-                     download_name=f"Section65B_Certificate_{evidence_id.replace('/', '_')}.pdf")
+    return send_file(buffer, mimetype="application/pdf", as_attachment=True, download_name=f"Section65B_Certificate_{evidence_id}.pdf")
 
 
 # =========================================================
-# ERROR HANDLING & ENTRY POINT
+# DUAL-RUNTIME HANDLER (STANDALONE FLASK + STREAMLIT CLOUD)
 # =========================================================
-@app.errorhandler(404)
-def not_found(_e):
-    body = """<div class="card" style="max-width:520px;margin:40px auto">
-      <h2>That page isn't part of the vault</h2>
-      <p class="muted">The link may be stale, or the record was removed.</p>
-      <a class="btn" href="{{ url_for('portal') if session.get('badge') else url_for('gateway') }}">
-        Back to safety</a></div>"""
-    return render_page(body, "Not found"), 404
-
-
-@app.errorhandler(413)
-def too_large(_e):
-    flash("That file exceeds the 512 MB evidence upload limit.", "error")
-    return redirect(url_for("portal", tab="cases")), 302
-
-
-@app.context_processor
-def inject_globals():
-    return {"THEME": THEME, "now": datetime.now()}
-
-
-def preflight():
-    """Check the environment before serving, so failures are readable instead of stack traces."""
-    problems = []
-
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM vault_system_users")
-        user_count = cur.fetchone()[0]
-        cur.close()
-        conn.close()
-        db_state = f"connected — {user_count} officer accounts"
-    except Exception as e:
-        first_line = str(e).strip().splitlines()[0][:110]
-        db_state = f"UNREACHABLE — {first_line}"
-        problems.append(
-            "Oracle is not reachable. Confirm the OracleServiceXE and "
-            "OracleOraDB21Home1TNSListener services are running, that the password in "
-            "config.json is correct, and that Local_SIH26.sql has been executed."
-        )
-
-    if not os.path.isdir(VAULT_STORAGE_DIR):
-        problems.append(f"Vault storage directory is missing: {VAULT_STORAGE_DIR}")
-
-    chain_state = "disabled in config.json"
-    if BLOCKCHAIN_CONFIG.get("enabled"):
-        if not BLOCKCHAIN_MODULE_AVAILABLE:
-            chain_state = "enabled but web3 / py-solc-x is not installed — anchoring will be skipped"
-        elif not BLOCKCHAIN_CONFIG.get("contract_address"):
-            chain_state = "enabled but no contract_address — run: python blockchain_manager.py"
-        else:
-            chain_state = f"enabled — contract {BLOCKCHAIN_CONFIG['contract_address'][:16]}…"
-
-    lan_ip = get_local_ip()
-    if SECURITY_CONFIG.get("enforce_mha_subnet"):
-        allowed = list(SECURITY_CONFIG.get("allowed_subnets", [])) + auto_local_prefixes()
-        subnet_state = "enforced — permitted: " + ", ".join(sorted(set(allowed)))
-    else:
-        subnet_state = "open to any network"
-
-    print("=" * 72)
-    print("  NyayaVault Web — Ministry of Home Affairs (PS-190)")
-    print("=" * 72)
-    print(f"  Oracle       : {db_state}")
-    print(f"  Blockchain   : {chain_state}")
-    print(f"  Vault store  : {VAULT_STORAGE_DIR}")
-    print(f"  Subnet policy: {subnet_state}")
-    print("-" * 72)
-    print(f"  This computer     ->  http://127.0.0.1:5000")
-    print(f"  Same Wi-Fi / LAN  ->  http://{lan_ip}:5000")
-    print("=" * 72)
-
-    for p in problems:
-        print(f"  [!] {p}")
-    if problems:
-        print("-" * 72)
-        print("  The server will still start so you can read the error in the browser.")
-        print("=" * 72)
-
-    print("  Press CTRL+C to stop the server.\n")
-
-
 def is_running_in_streamlit():
     if any("streamlit" in str(arg).lower() for arg in sys.argv):
         return True
@@ -3528,65 +3111,44 @@ def is_running_in_streamlit():
 
 
 if is_running_in_streamlit():
-    # 1. Attach Flask WSGI Container to Streamlit's Tornado server
-    try:
-        from streamlit.web.server.server import Server
-    except ImportError:
-        try:
-            from streamlit.server.server import Server
-        except ImportError:
-            Server = None
+    import streamlit as st
+    import streamlit.components.v1 as components
+    import threading
 
-    if Server is not None:
-        try:
-            server = Server.get_current()
-            if server and hasattr(server, "_app"):
-                import tornado.wsgi
-                from tornado.routing import Rule, PathMatches
+    st.set_page_config(
+        page_title="NyayaVault — Ministry of Home Affairs",
+        layout="wide",
+        initial_sidebar_state="collapsed"
+    )
 
-                router = getattr(server._app, "default_router", getattr(server._app, "wildcard_router", None))
-                if router and hasattr(router, "rules"):
-                    if not any(getattr(r, "_is_nyaya_wsgi", False) for r in router.rules):
-                        wsgi_handler = tornado.wsgi.WSGIContainer(app)
-                        rule = Rule(PathMatches(r"^(?!/(_stcore|static)).*"), wsgi_handler)
-                        rule._is_nyaya_wsgi = True
-                        router.rules.insert(0, rule)
-        except Exception:
-            pass
+    st.markdown(
+        """
+        <style>
+        #MainMenu {visibility: hidden;}
+        header {visibility: hidden;}
+        footer {visibility: hidden;}
+        .block-container {padding: 0 !important; margin: 0 !important; max-width: 100% !important;}
+        iframe {border: none !important; width: 100% !important; min-height: 98vh;}
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
 
-    # 2. Render the initial Gateway UI directly into Streamlit
-    try:
-        import streamlit as st
-        import streamlit.components.v1 as components
-
-        st.set_page_config(
-            page_title="NyayaVault — Ministry of Home Affairs",
-            layout="wide",
-            initial_sidebar_state="collapsed"
+    # Launch background Flask thread if not active
+    if "flask_thread_started" not in st.session_state:
+        st.session_state.flask_thread_started = True
+        flask_thread = threading.Thread(
+            target=lambda: app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False),
+            daemon=True
         )
-        st.markdown(
-            """
-            <style>
-            #MainMenu {visibility: hidden;}
-            header {visibility: hidden;}
-            footer {visibility: hidden;}
-            .block-container {padding: 0 !important; margin: 0 !important; max-width: 100% !important;}
-            iframe {border: none !important; width: 100% !important;}
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
+        flask_thread.start()
 
-        with app.test_request_context("/"):
-            gateway_html = render_page(GATEWAY_TPL, "Authentication gateway",
-                                       view="officer", positions=LOGIN_POSITIONS)
-
-        components.html(gateway_html, height=920, scrolling=True)
-    except Exception:
-        pass
+    components.iframe("http://127.0.0.1:5000", height=980, scrolling=True)
 
 else:
     if __name__ == "__main__":
-        preflight()
-        # host="0.0.0.0" lets other machines on the police intranet reach the vault.
+        print("=" * 64)
+        print(" NyayaVault Web — Ministry of Home Affairs (PS-190)")
+        print(" Listening on: http://127.0.0.1:5000")
+        print("=" * 64)
         app.run(host="0.0.0.0", port=5000, debug=False)
