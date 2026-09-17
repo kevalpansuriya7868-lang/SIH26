@@ -186,6 +186,7 @@ role_selection = st.sidebar.selectbox(
     ]
 )
 
+# Auto-logout if role changes
 if "last_role" not in st.session_state:
     st.session_state.last_role = role_selection
 
@@ -353,12 +354,9 @@ else:
                     
                     submitted = st.form_submit_button("Commit Case & Encrypted Evidence to Station Vault")
                     if submitted:
-                        enc_bytes = EncryptionEngine.encrypt_file(new_desc.encode() if False else io.BytesIO(new_desc.encode()), ...) #handled cleanly below
                         ex_filename = f"{st.session_state.nav_station.replace(' ', '_')}_{new_cno.replace('/', '_')}.nyayavault"
                         save_path = os.path.join(VAULT_STORAGE_DIR, ex_filename)
                         
-                        # Encrypt string payload directly
-                        from cryptography.fernet import Fernet
                         cipher = EncryptionEngine.get_cipher()
                         encrypted_data = cipher.encrypt(new_desc.encode())
                         with open(save_path, "wb") as sf:
