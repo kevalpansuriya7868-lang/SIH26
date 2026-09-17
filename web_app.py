@@ -88,51 +88,17 @@ class EncryptionEngine:
         return Fernet(key)
 
     @staticmethod
-    def encrypt_file(source_path, target_encrypted_path):
+    def encrypt_payload(plain_text_bytes):
         cipher = EncryptionEngine.get_cipher()
-        with open(source_path, "rb") as f_in:
-            data = f_in.read()
-        enc_data = cipher.encrypt(data)
-        with open(target_encrypted_path, "wb") as f_out:
-            f_out.write(enc_data)
+        return cipher.encrypt(plain_text_bytes)
 
     @staticmethod
-    def decrypt_file_to_bytes(target_encrypted_path):
+    def decrypt_payload(encrypted_bytes):
         cipher = EncryptionEngine.get_cipher()
-        with open(target_encrypted_path, "rb") as f_in:
-            enc_data = f_in.read()
-        return cipher.decrypt(enc_data)
+        return cipher.decrypt(encrypted_bytes)
 
 
-class IntelligentClassifier:
-    @staticmethod
-    def analyze_evidence(file_path, filename):
-        ext = os.path.splitext(filename)[1].lower()
-        extracted_text = f"Analyzed binary metadata for: {filename}\nFile extension: {ext}\nIngest Timestamp: {datetime.now()}"
-
-        if ext in [".mp4", ".avi", ".mkv", ".mov"]:
-            category = "CCTV Video Footage"
-            classification = "Surveillance Video Exhibit (Digital Multimedia)"
-        elif ext in [".jpg", ".jpeg", ".png", ".bmp"]:
-            category = "Crime Scene Photograph"
-            classification = "Forensic Physical/Scene Visual Evidence"
-        elif ext in [".wav", ".mp3", ".aac"]:
-            category = "Call Audio Recording"
-            classification = "Audio Intercept / Telephony Recording"
-        elif ext in [".raw", ".dd", ".img", ".e01"]:
-            category = "Disk Dump Image"
-            classification = "Bit-Stream Hard Drive Forensic Image"
-        elif ext in [".pdf", ".docx", ".txt"]:
-            category = "Forensic Lab Report"
-            classification = "Documentary / Chemical / DNA Analysis Report"
-        else:
-            category = "Digital Exhibit"
-            classification = "General Digital Electronic Record"
-
-        return category, classification, extracted_text
-
-
-# Initialize Session State
+# Initialize Session State for Hierarchical Tree & Cases
 if "hierarchy_db" not in st.session_state:
     st.session_state.hierarchy_db = {
         "Gujarat": {
@@ -156,14 +122,22 @@ if "hierarchy_db" not in st.session_state:
 if "cases_db" not in st.session_state:
     st.session_state.cases_db = {
         "Katargam Police Station": [
-            {"Case No": "CR/KTG/2026/012", "Title": "Textile Mill Financial Embezzlement", "FIR": "FIR-402", "Status": "Under Investigation", "IO": "Insp. V.R. Jadeja", "Victim": "Shree Ram Mills", "Scene": "Ring Road", "Evidence File": "Katargam_PS_CR_KTG_2026_012.nyayavault", "Details": "Server logs & forged ledgers."},
-            {"Case No": "CR/KTG/2026/019", "Title": "Diamond Vault Break-in", "FIR": "FIR-411", "Status": "Charge Sheet Filed", "IO": "Insp. R.K. Patel", "Victim": "Nakshatra Gems", "Scene": "Varachha", "Evidence File": "Katargam_PS_CR_KTG_2026_019.nyayavault", "Details": "CCTV bitstream backup."}
-        ],
-        "Navrangpura Police Station": [
-            {"Case No": "CR/NVR/2026/088", "Title": "Fake University Degree Racket", "FIR": "FIR-220", "Status": "Under Investigation", "IO": "Insp. A.B. Shah", "Victim": "Gujarat Board", "Scene": "CG Road", "Evidence File": "Navrangpura_PS_CR_NVR_2026_088.nyayavault", "Details": "Seized server hard disk image."}
+            {
+                "Case No": "CR/KTG/2026/012", 
+                "Title": "Textile Mill Financial Embezzlement", 
+                "FIR": "FIR-402", 
+                "Status": "Under Investigation", 
+                "IO": "Insp. V.R. Jadeja", 
+                "Victim": "Shree Ram Mills", 
+                "Scene": "Ring Road", 
+                "Evidence File": "Katargam_PS_CR_KTG_2026_012.nyayavault", 
+                "File Type": "text",
+                "Details": "Server logs & forged ledgers."
+            }
         ]
     }
 
+# Navigation states
 if "nav_city" not in st.session_state:
     st.session_state.nav_city = None
 if "nav_area" not in st.session_state:
@@ -268,7 +242,7 @@ else:
         if auth_level == "JUDGE":
             st.info("⚖️ **Judicial Inspection Portal:** Secure read-only access to inspect police station case dockets, verify cryptographic chain of custody, and validate Section 63/65B certificates.")
 
-        # CASE WORKSPACE VIEW
+        # CASE WORKSPACE VIEW (WITH IMAGE & VIDEO RENDERING)
         if st.session_state.selected_case is not None:
             station_cases = st.session_state.cases_db.get(st.session_state.nav_station, [])
             active_case_data = next((c for c in station_cases if c['Case No'] == st.session_state.selected_case), None)
@@ -293,28 +267,36 @@ else:
                     st.markdown(f"**Case Description:** {active_case_data['Details']}")
 
                 st.markdown("---")
-                st.markdown("### 🔓 View, Decrypt & Download Case Exhibits")
+                st.markdown("### 🔓 View, Decrypt & Inspect Case Exhibits (Images, Videos & Documents)")
                 target_path = os.path.join(VAULT_STORAGE_DIR, active_case_data['Evidence File'])
                 
                 if os.path.exists(target_path):
-                    if st.button("Decrypt & Inspect Case Evidence File"):
-                        try:
-                            orig_bytes = EncryptionEngine.decrypt_file_to_bytes(target_path)
-                            st.success("✅ Verification Passed: Tamper-free decrypted payload loaded!")
-                            
+                    try:
+                        with open(target_path, "rb") as tf:
+                            enc_bytes = tf.read()
+                        orig_bytes = EncryptionEngine.decrypt_payload(enc_bytes)
+                        st.success("✅ Cryptographic Verification Passed: Tamper-free decrypted exhibit loaded from secure vault!")
+
+                        file_type = active_case_data.get("File Type", "text")
+                        
+                        if file_type == "image":
+                            st.image(orig_bytes, caption=f"Decrypted Evidence Exhibit — {active_case_data['Case No']}", use_column_width=True)
+                        elif file_type == "video":
+                            st.video(orig_bytes)
+                        else:
                             try:
                                 decoded_text = orig_bytes.decode('utf-8')
                                 st.text_area("Decrypted Evidence Content:", value=decoded_text, height=120)
                             except Exception:
                                 st.info("Binary media payload ready.")
-                            
-                            st.download_button(
-                                label="📥 Download Decrypted Original Evidence",
-                                data=orig_bytes,
-                                file_name=f"Decrypted_{active_case_data['Case No'].replace('/', '_')}.bin"
-                            )
-                        except Exception as ex:
-                            st.error(f"Decryption failed! Tamper seal mismatch. Details: {ex}")
+
+                        st.download_button(
+                            label="📥 Download Decrypted Original Evidence File",
+                            data=orig_bytes,
+                            file_name=f"Decrypted_{active_case_data['Case No'].replace('/', '_')}.bin"
+                        )
+                    except Exception as ex:
+                        st.error(f"Decryption failed! Tamper seal mismatch or corrupt storage. Details: {ex}")
                 else:
                     st.warning("No encrypted vault file generated yet for this case.")
 
@@ -343,7 +325,8 @@ else:
 
             if auth_level != "JUDGE":
                 st.markdown("---")
-                st.markdown("#### ➕ Register New Case & Evidence for this Station")
+                st.markdown("#### ➕ Register New Case & Upload Evidence (Image / Video / Document) for this Station")
+                
                 with st.form("new_case_form"):
                     new_cno = st.text_input("Case Number", value="CR/KTG/2026/100")
                     new_title = st.text_input("Case Title", value="Cyber Extortion Investigation")
@@ -353,25 +336,47 @@ else:
                     new_desc = st.text_area("Evidence & Case Details", value="Encrypted smartphone dump and financial trail.")
                     
                     submitted = st.form_submit_button("Commit Case & Encrypted Evidence to Station Vault")
-                    if submitted:
-                        ex_filename = f"{st.session_state.nav_station.replace(' ', '_')}_{new_cno.replace('/', '_')}.nyayavault"
-                        save_path = os.path.join(VAULT_STORAGE_DIR, ex_filename)
-                        
-                        cipher = EncryptionEngine.get_cipher()
-                        encrypted_data = cipher.encrypt(new_desc.encode())
-                        with open(save_path, "wb") as sf:
-                            sf.write(encrypted_data)
-                        
-                        new_entry = {
-                            "Case No": new_cno, "Title": new_title, "FIR": new_fir, 
-                            "Status": "Under Investigation", "IO": new_io, "Victim": new_victim, 
-                            "Scene": st.session_state.nav_area, "Evidence File": ex_filename, "Details": new_desc
-                        }
-                        if st.session_state.nav_station not in st.session_state.cases_db:
-                            st.session_state.cases_db[st.session_state.nav_station] = []
-                        st.session_state.cases_db[st.session_state.nav_station].append(new_entry)
-                        st.success("Case and encrypted evidence successfully committed to station vault!")
-                        st.rerun()
+                
+                # File uploader outside form for seamless handling of uploaded media bytes
+                uploaded_file = st.file_uploader("Upload Evidence Exhibit (Image: jpg/png, Video: mp4/mov/avi)", type=["jpg", "jpeg", "png", "mp4", "mov", "avi", "txt", "pdf"])
+
+                if submitted:
+                    ex_filename = f"{st.session_state.nav_station.replace(' ', '_')}_{new_cno.replace('/', '_')}.nyayavault"
+                    save_path = os.path.join(VAULT_STORAGE_DIR, ex_filename)
+                    
+                    file_type = "text"
+                    raw_bytes = new_desc.encode()
+
+                    if uploaded_file is not None:
+                        raw_bytes = uploaded_file.read()
+                        fname_lower = uploaded_file.name.lower()
+                        if any(fname_lower.endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".bmp"]):
+                            file_type = "image"
+                        elif any(fname_lower.endswith(ext) for ext in [".mp4", ".mov", ".avi", ".mkv"]):
+                            file_type = "video"
+
+                    cipher = EncryptionEngine.get_cipher()
+                    encrypted_data = cipher.encrypt(raw_bytes)
+                    with open(save_path, "wb") as sf:
+                        sf.write(encrypted_data)
+                    
+                    new_entry = {
+                        "Case No": new_cno, 
+                        "Title": new_title, 
+                        "FIR": new_fir, 
+                        "Status": "Under Investigation", 
+                        "IO": new_io, 
+                        "Victim": new_victim, 
+                        "Scene": st.session_state.nav_area, 
+                        "Evidence File": ex_filename, 
+                        "File Type": file_type,
+                        "Details": new_desc
+                    }
+                    if st.session_state.nav_station not in st.session_state.cases_db:
+                        st.session_state.cases_db[st.session_state.nav_station] = []
+                    st.session_state.cases_db[st.session_state.nav_station].append(new_entry)
+                    st.success("Case and encrypted evidence successfully committed to station vault!")
+                    st.rerun()
 
         # AREA / STATION SELECTION LEVEL
         elif st.session_state.nav_area:
@@ -475,7 +480,7 @@ else:
                             d_station = st.selectbox("Select Police Station to Remove", d_stations)
                             if st.button("Remove Police Station"):
                                 gujarat_data[d_city][d_area].remove(d_station)
-                                st.success(f"Police Station '{d_station}' removed.")
+                                st.success(f"Station '{d_station}' removed.")
                                 st.rerun()
 
     with tab2:
