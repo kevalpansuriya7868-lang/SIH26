@@ -1,13 +1,9 @@
 """
 web_app.py — NyayaVault Web Edition (Flask & Streamlit Dual Compatible)
 
-A 1:1 web port of app.py (the CustomTkinter desktop client) styled with the
-complete MHA theme, icons, symbols, and layouts from web_app1.py. Every screen,
-rank rule, Oracle query, AES-256 seal, SHA-256 audit chain, blockchain
-anchor, and ReportLab PDF is fully implemented.
-
-Reads configuration from config.json, interfaces with the schema defined in
-Local_SIH26.sql, and manages evidence files in secure_vault_storage.
+High-contrast text styling applied: all labels, inputs, dropdowns,
+table cells, cards, and modal previews enforce solid black / dark-navy text (#000000 / #0F172A)
+for maximum readability on light backgrounds.
 """
 
 import os
@@ -84,25 +80,24 @@ MASTER_SALT = b"MHA_NYAYAVAULT_KEY_DERIVATION_SALT_2026"
 
 ANALYTICS_PASSWORD = "analytics123"
 
-# Identical official palette from CustomTkinter and web_app1.py
 THEME = {
     "bg_main": "#F1F5F9",
     "card_bg": "#FFFFFF",
-    "card_border": "#D5DEE7",
+    "card_border": "#CBD5E1",
     "card_highlight": "#F8FAFC",
-    "input_bg": "#F8FAFC",
-    "primary": "#1E3A8A",            # Deep Navy (MHA Official Theme)
+    "input_bg": "#FFFFFF",
+    "primary": "#1E3A8A",            # Deep Navy
     "primary_hover": "#1E40AF",
     "hero_gradient": "#244CB9",
     "hero_gradient_dark": "#172554",
-    "accent_gold": "#D97706",
-    "accent_gold_hover": "#B45309",
-    "accent_green": "#059669",
-    "accent_green_hover": "#047857",
-    "accent_red": "#DC2626",
-    "accent_red_hover": "#B91C1C",
-    "text_main": "#0F172A",
-    "text_muted": "#64748B"
+    "accent_gold": "#B45309",
+    "accent_gold_hover": "#92400E",
+    "accent_green": "#047857",
+    "accent_green_hover": "#065F46",
+    "accent_red": "#B91C1C",
+    "accent_red_hover": "#991B1B",
+    "text_main": "#000000",          # Solid High-Contrast Black
+    "text_muted": "#1E293B"          # High-Contrast Dark Slate
 }
 
 CASE_CATEGORIES = [
@@ -127,7 +122,6 @@ LOGIN_POSITIONS = [
     "Super Admin / Master IT"
 ]
 
-# In-memory seed accounts matching schema seed data for instant verification
 SEED_USERS = {
     "admin": {"name": "Inspector General Rajesh Verma", "rank": "Director General of Police (DGP)", "level": 5, "role": "SUPER_ADMIN", "pwd": "admin123", "badge": "ADMIN-001", "div": "SURAT", "area": "State HQ", "unit": "State Command Center"},
     "cp_surat": {"name": "Shri Anupam Gehlot", "rank": "Commissioner of Police (City CP)", "level": 4, "role": "COMMISSIONER", "pwd": "surat123", "badge": "CP-SUR-01", "div": "SURAT", "area": "City Central", "unit": "Surat Headquarters"},
@@ -421,40 +415,40 @@ def fetch_divisions():
 
 
 # =========================================================
-# SHARED THEME & RESPONSIVE HTML TEMPLATE (MHA PALETTE)
+# HIGH-CONTRAST SHARED CSS
 # =========================================================
 BASE_CSS = """
 :root {
   --bg-main: #F1F5F9;
   --card-bg: #FFFFFF;
-  --card-border: #D5DEE7;
+  --card-border: #94A3B8;
   --card-highlight: #F8FAFC;
-  --input-bg: #F8FAFC;
+  --input-bg: #FFFFFF;
   --primary: #1E3A8A;
   --primary-hover: #1E40AF;
-  --hero: #244CB9;
-  --hero-dark: #172554;
-  --gold: #D97706;
-  --gold-hover: #B45309;
-  --green: #059669;
-  --green-hover: #047857;
-  --red: #DC2626;
-  --red-hover: #B91C1C;
-  --text: #0F172A;
-  --muted: #64748B;
+  --hero: #1E3A8A;
+  --hero-dark: #0F172A;
+  --gold: #B45309;
+  --gold-hover: #92400E;
+  --green: #047857;
+  --green-hover: #065F46;
+  --red: #B91C1C;
+  --red-hover: #991B1B;
+  --text: #000000;
+  --muted: #1E293B;
 }
 * { box-sizing: border-box; }
 body {
   margin: 0;
   background: var(--bg-main);
   color: var(--text);
-  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
   font-size: 14px;
 }
 a { color: var(--primary); text-decoration: none; }
 .topbar {
   background: var(--card-bg);
-  border-bottom: 1px solid var(--card-border);
+  border-bottom: 2px solid var(--card-border);
   padding: 12px 24px;
   display: flex;
   align-items: center;
@@ -462,8 +456,8 @@ a { color: var(--primary); text-decoration: none; }
   gap: 16px;
   flex-wrap: wrap;
 }
-.topbar h1 { font-size: 15px; margin: 0; color: var(--primary); font-weight: 800; }
-.topbar .who { font-size: 11px; color: var(--green); margin-top: 3px; font-weight: 700; }
+.topbar h1 { font-size: 16px; margin: 0; color: var(--primary); font-weight: 900; }
+.topbar .who { font-size: 12px; color: var(--green); margin-top: 3px; font-weight: 800; }
 .topbar .actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .btn {
   display: inline-flex;
@@ -471,12 +465,12 @@ a { color: var(--primary); text-decoration: none; }
   justify-content: center;
   gap: 6px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 9px 15px;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 800;
   cursor: pointer;
-  color: #fff;
+  color: #FFFFFF !important;
   background: var(--primary);
   text-decoration: none;
   line-height: 1.2;
@@ -486,87 +480,93 @@ a { color: var(--primary); text-decoration: none; }
 .btn.gold { background: var(--gold); } .btn.gold:hover { background: var(--gold-hover); }
 .btn.red { background: var(--red); } .btn.red:hover { background: var(--red-hover); }
 .btn.blue { background: #0284C7; } .btn.blue:hover { background: #0369A1; }
-.btn.dark { background: #1E293B; } .btn.dark:hover { background: #0F172A; }
-.btn.slate { background: #64748B; } .btn.slate:hover { background: #475569; }
-.btn.ghost { background: transparent; color: #FFFFFF; border: 2px solid #FFFFFF; border-radius: 25px; }
-.btn.ghost:hover { background: rgba(255,255,255,0.15); }
-.btn.small { padding: 6px 11px; font-size: 11px; border-radius: 8px; }
+.btn.dark { background: #0F172A; } .btn.dark:hover { background: #020617; }
+.btn.slate { background: #334155; } .btn.slate:hover { background: #1E293B; }
+.btn.ghost { background: transparent; color: #FFFFFF !important; border: 2px solid #FFFFFF; border-radius: 25px; }
+.btn.ghost:hover { background: rgba(255,255,255,0.2); }
+.btn.small { padding: 6px 11px; font-size: 11px; border-radius: 6px; }
 .wrap { padding: 18px 24px 40px; }
 .card {
   background: var(--card-bg);
   border: 1px solid var(--card-border);
-  border-radius: 14px;
+  border-radius: 12px;
   padding: 18px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  color: #000000;
 }
-.card h2 { margin: 0 0 10px; font-size: 16px; color: var(--primary); font-weight: 800; }
-.card h3 { margin: 0 0 8px; font-size: 13px; color: var(--primary); font-weight: 700; }
-.muted { color: var(--muted); font-size: 11.5px; }
-label { display: block; font-size: 11.5px; font-weight: 700; color: var(--text); margin: 8px 0 3px; }
+.card h2 { margin: 0 0 10px; font-size: 17px; color: var(--primary); font-weight: 900; }
+.card h3 { margin: 0 0 8px; font-size: 14px; color: var(--primary); font-weight: 800; }
+.muted { color: #1E293B !important; font-size: 12px; font-weight: 600; }
+label { display: block; font-size: 12px; font-weight: 800; color: #000000 !important; margin: 8px 0 3px; }
 input[type=text], input[type=password], input[type=email], input[type=number], input[type=file], select, textarea {
   width: 100%;
-  background: var(--input-bg);
-  border: 1px solid var(--card-border);
+  background: #FFFFFF !important;
+  border: 1.5px solid #64748B !important;
   border-radius: 8px;
   padding: 9px 12px;
-  font-size: 13px;
-  color: var(--text);
+  font-size: 13.5px;
+  color: #000000 !important;
+  font-weight: 600;
   font-family: inherit;
+}
+input::placeholder, textarea::placeholder {
+  color: #475569 !important;
+  opacity: 1;
 }
 .split { display: grid; grid-template-columns: 330px 1fr; gap: 16px; align-items: start; }
 @media(max-width: 900px) { .split { grid-template-columns: 1fr; } }
 .tabs {
   display: flex;
   gap: 6px;
-  background: var(--card-highlight);
+  background: #E2E8F0;
   border: 1px solid var(--card-border);
   border-radius: 10px;
   padding: 6px;
   margin-bottom: 14px;
   flex-wrap: wrap;
 }
-.tabs a { padding: 8px 14px; border-radius: 8px; font-size: 12px; font-weight: 700; color: var(--muted); }
-.tabs a.active { background: var(--primary); color: #fff; }
-.table-scroll { overflow-x: auto; border: 1px solid var(--card-border); border-radius: 10px; background: var(--card-bg); }
-table { border-collapse: collapse; width: 100%; font-size: 12px; min-width: 640px; }
+.tabs a { padding: 8px 14px; border-radius: 8px; font-size: 12px; font-weight: 800; color: #1E293B; }
+.tabs a.active { background: var(--primary); color: #FFFFFF !important; }
+.table-scroll { overflow-x: auto; border: 1.5px solid var(--card-border); border-radius: 10px; background: var(--card-bg); }
+table { border-collapse: collapse; width: 100%; font-size: 12.5px; min-width: 640px; color: #000000; }
 th {
-  background: var(--card-highlight);
-  color: var(--text);
+  background: #E2E8F0;
+  color: #000000 !important;
   text-align: center;
-  font-weight: 700;
-  padding: 10px 8px;
-  border-bottom: 1px solid var(--card-border);
+  font-weight: 900;
+  padding: 11px 8px;
+  border-bottom: 2px solid var(--card-border);
   white-space: nowrap;
 }
-td { padding: 9px 8px; border-bottom: 1px solid #EEF2F7; text-align: center; vertical-align: middle; }
-tr:hover { background: var(--card-highlight); }
+td { padding: 10px 8px; border-bottom: 1px solid #CBD5E1; text-align: center; vertical-align: middle; color: #000000; font-weight: 600; }
+tr:hover { background: #F1F5F9; }
 td.left, th.left { text-align: left; }
-.hash { font-family: Consolas, Menlo, monospace; font-size: 10.5px; word-break: break-all; }
+.hash { font-family: Consolas, Menlo, monospace; font-size: 11px; word-break: break-all; color: #000000 !important; font-weight: 700; }
 .flashes { margin: 0 0 14px; padding: 0; list-style: none; }
-.flashes li { padding: 11px 14px; border-radius: 10px; margin-bottom: 8px; font-size: 12.5px; font-weight: 600; }
-.flashes li.ok { background: #ECFDF5; color: #065F46; border: 1px solid #A7F3D0; }
-.flashes li.error { background: #FEF2F2; color: #991B1B; border: 1px solid #FECACA; }
-.flashes li.warn { background: #FFFBEB; color: #92400E; border: 1px solid #FDE68A; }
-.flashes li.info { background: #EFF6FF; color: #1E40AF; border: 1px solid #BFDBFE; }
-.pill { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 10px; font-weight: 700; color: #fff; }
+.flashes li { padding: 11px 14px; border-radius: 10px; margin-bottom: 8px; font-size: 13px; font-weight: 700; }
+.flashes li.ok { background: #ECFDF5; color: #064E3B; border: 1.5px solid #34D399; }
+.flashes li.error { background: #FEF2F2; color: #7F1D1D; border: 1.5px solid #F87171; }
+.flashes li.warn { background: #FFFBEB; color: #78350F; border: 1.5px solid #FBBF24; }
+.flashes li.info { background: #EFF6FF; color: #1E3A8A; border: 1.5px solid #60A5FA; }
+.pill { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 10.5px; font-weight: 800; color: #FFFFFF !important; }
 .pill.navy { background: var(--primary); }
 .pill.green { background: var(--green); }
 .pill.red { background: var(--red); }
 .pill.gold { background: var(--gold); }
-.pill.slate { background: #64748B; }
+.pill.slate { background: #334155; }
 .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
-.metric { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px; }
-.metric .t { font-size: 11px; font-weight: 700; color: var(--muted); }
-.metric .v { font-size: 22px; font-weight: 800; margin-top: 4px; }
-.bar { height: 14px; border-radius: 7px; background: var(--input-bg); overflow: hidden; flex: 1; }
+.metric { background: var(--card-bg); border: 1.5px solid var(--card-border); border-radius: 12px; padding: 14px; color: #000000; }
+.metric .t { font-size: 11.5px; font-weight: 800; color: #1E293B; }
+.metric .v { font-size: 24px; font-weight: 900; margin-top: 4px; color: #000000; }
+.bar { height: 14px; border-radius: 7px; background: #E2E8F0; overflow: hidden; flex: 1; border: 1px solid #CBD5E1; }
 .bar span { display: block; height: 100%; border-radius: 7px; }
-.catrow { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
-.catrow .n { width: 190px; font-size: 11px; font-weight: 700; }
-.catrow .c { width: 120px; text-align: right; font-size: 11px; font-weight: 700; color: var(--muted); }
+.catrow { display: flex; align-items: center; gap: 10px; margin: 8px 0; color: #000000; }
+.catrow .n { width: 190px; font-size: 12px; font-weight: 800; color: #000000; }
+.catrow .c { width: 120px; text-align: right; font-size: 12px; font-weight: 800; color: #1E293B; }
 .media-frame { background: #0F172A; border-radius: 10px; padding: 12px; text-align: center; margin-top: 10px; }
 .media-frame img, .media-frame video { max-width: 100%; max-height: 440px; border-radius: 6px; display: block; margin: 0 auto; }
 .media-frame audio { width: 100%; margin-top: 6px; }
-.media-frame pre { text-align: left; color: #E2E8F0; font-size: 11.5px; max-height: 380px; overflow: auto; margin: 0; white-space: pre-wrap; }
+.media-frame pre { text-align: left; color: #FFFFFF; font-size: 12px; max-height: 380px; overflow: auto; margin: 0; white-space: pre-wrap; font-weight: 600; }
 .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .stack > * + * { margin-top: 9px; }
 .hierarchy-item {
@@ -579,7 +579,9 @@ td.left, th.left { text-align: left; }
   border-radius: 10px;
   padding: 10px 12px;
   margin-bottom: 8px;
+  color: #000000;
 }
+.hierarchy-item b { color: #000000 !important; }
 """
 
 LAYOUT = """
@@ -639,40 +641,40 @@ def render_page(body_template, page_title="NyayaVault", **ctx):
 
 
 # =========================================================
-# SCREEN 1 — LOGIN GATEWAY (DEFAULT PRE-FILLED ID/PASS)
+# SCREEN 1 — LOGIN GATEWAY
 # =========================================================
 GATEWAY_TPL = """
 <div style="max-width:940px;margin:25px auto">
   <div style="text-align:center;margin-bottom:20px">
-    <div style="font-size:18px;font-weight:800;color:var(--primary);letter-spacing:0.5px">
+    <div style="font-size:20px;font-weight:900;color:var(--primary);letter-spacing:0.5px">
       MINISTRY OF HOME AFFAIRS (GOVERNMENT OF INDIA)
     </div>
-    <div class="muted" style="font-size:12px;margin-top:4px">
+    <div class="muted" style="font-size:13px;margin-top:4px">
       NyayaVault: Chain-of-Command &amp; Rank Authentication Gateway (PS-190)
     </div>
   </div>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;border-radius:22px;
-              overflow:hidden;border:1px solid var(--card-border);background:var(--card-bg);
-              box-shadow:0 8px 30px rgba(0,0,0,0.06)">
+  <div style="display:grid;grid-template-columns:1fr 1fr;border-radius:18px;
+              overflow:hidden;border:2px solid var(--card-border);background:var(--card-bg);
+              box-shadow:0 8px 30px rgba(0,0,0,0.08)">
 
     <!-- Hero / Toggle Panel -->
-    <div style="background:var(--hero);color:#fff;padding:45px 35px;display:flex;flex-direction:column;justify-content:center;text-align:center">
+    <div style="background:linear-gradient(135deg, var(--hero), var(--hero-dark));color:#fff;padding:45px 35px;display:flex;flex-direction:column;justify-content:center;text-align:center">
       {% if view == 'judicial' %}
-        <span class="pill" style="background:#F59E0B;align-self:center;margin-bottom:12px">JUDICIAL INSPECTION ACCESS</span>
-        <h2 style="color:#fff;font-size:22px;margin:8px 0 10px;font-weight:700">Judicial &amp; Prosecution Portal</h2>
-        <p style="color:#EFF6FF;font-size:12px;line-height:1.6;margin-bottom:24px">
+        <span class="pill" style="background:#B45309;align-self:center;margin-bottom:12px">JUDICIAL INSPECTION ACCESS</span>
+        <h2 style="color:#fff;font-size:22px;margin:8px 0 10px;font-weight:800">Judicial &amp; Prosecution Portal</h2>
+        <p style="color:#EFF6FF;font-size:12.5px;line-height:1.6;margin-bottom:24px;font-weight:500">
           Read-only evidence manifest inspection and live tamper hash verification under Section 65B/63.
         </p>
-        <p style="color:#DBEAFE;font-size:11px;margin-bottom:10px">Need Law Enforcement Entrance?</p>
+        <p style="color:#DBEAFE;font-size:12px;margin-bottom:10px;font-weight:700">Need Law Enforcement Entrance?</p>
         <a class="btn ghost" href="{{ url_for('gateway', view='officer') }}" style="align-self:center;width:220px">Switch to Police Gateway</a>
       {% else %}
-        <span class="pill" style="background:#3B82F6;align-self:center;margin-bottom:12px">STAGE 1 — HIERARCHY GATEWAY</span>
-        <h2 style="color:#fff;font-size:22px;margin:8px 0 10px;font-weight:700">Law Enforcement Login</h2>
-        <p style="color:#EFF6FF;font-size:12px;line-height:1.6;margin-bottom:20px">
+        <span class="pill" style="background:#2563EB;align-self:center;margin-bottom:12px">STAGE 1 — HIERARCHY GATEWAY</span>
+        <h2 style="color:#fff;font-size:22px;margin:8px 0 10px;font-weight:800">Law Enforcement Login</h2>
+        <p style="color:#EFF6FF;font-size:12.5px;line-height:1.6;margin-bottom:20px;font-weight:500">
           Select your designated police post/rank first. Your jurisdiction is securely linked directly to your database badge ID.
         </p>
-        <p style="color:#DBEAFE;font-size:11px;margin-bottom:8px">Presiding Magistrate or Judicial Clerk?</p>
+        <p style="color:#DBEAFE;font-size:12px;margin-bottom:8px;font-weight:700">Presiding Magistrate or Judicial Clerk?</p>
         <a class="btn ghost" href="{{ url_for('gateway', view='judicial') }}" style="align-self:center;width:220px;margin-bottom:12px">Switch to Judicial Portal</a>
         <a class="btn gold" href="{{ url_for('analytics_gate') }}" style="align-self:center;width:220px;border-radius:25px">📊 Open Analytics Intelligence</a>
       {% endif %}
@@ -681,8 +683,8 @@ GATEWAY_TPL = """
     <!-- Active Form Panel -->
     <div style="padding:40px 32px">
       {% if view == 'judicial' %}
-        <span class="pill gold" style="background:#FEF3C7;color:var(--gold);margin-bottom:10px">JUDICIAL CREDENTIALS</span>
-        <h2 style="margin:10px 0 16px;font-size:19px;color:var(--text)">Judicial Inspection Access</h2>
+        <span class="pill gold" style="background:#FEF3C7;color:#92400E;margin-bottom:10px">JUDICIAL CREDENTIALS</span>
+        <h2 style="margin:10px 0 16px;font-size:20px;color:var(--primary);font-weight:900">Judicial Inspection Access</h2>
         <form method="post" action="{{ url_for('court_login') }}" class="stack">
           <div>
             <label>Judge ID</label>
@@ -692,11 +694,11 @@ GATEWAY_TPL = """
             <label>Judicial Cryptographic Password</label>
             <input type="password" name="password" value="court123" required>
           </div>
-          <button class="btn gold" style="width:100%;margin-top:16px;height:42px">Authenticate Judicial Identity ➔</button>
+          <button class="btn gold" style="width:100%;margin-top:16px;height:44px">Authenticate Judicial Identity ➔</button>
         </form>
       {% else %}
-        <span class="pill navy" style="background:#EFF6FF;color:var(--primary);margin-bottom:10px">OFFICER HIERARCHY LOGIN</span>
-        <h2 style="margin:10px 0 16px;font-size:19px;color:var(--text)">Command Position Login</h2>
+        <span class="pill navy" style="background:#DBEAFE;color:#1E3A8A;margin-bottom:10px">OFFICER HIERARCHY LOGIN</span>
+        <h2 style="margin:10px 0 16px;font-size:20px;color:var(--primary);font-weight:900">Command Position Login</h2>
         <form method="post" action="{{ url_for('officer_login') }}" class="stack">
           <div>
             <label>Step 1: Select Your Position / Post</label>
@@ -719,8 +721,8 @@ GATEWAY_TPL = """
             <input type="password" name="password" value="admin123" required>
           </div>
           <div class="row" style="margin-top:16px">
-            <button class="btn" style="height:42px;flex:1">Authenticate &amp; Unlock Vault ➔</button>
-            <a class="btn ghost" href="{{ url_for('forgot_password') }}" style="height:42px;color:var(--primary);border-color:var(--primary)">Forgot Password?</a>
+            <button class="btn" style="height:44px;flex:1">Authenticate &amp; Unlock Vault ➔</button>
+            <a class="btn ghost" href="{{ url_for('forgot_password') }}" style="height:44px;color:var(--primary) !important;border-color:var(--primary)">Forgot Password?</a>
           </div>
         </form>
       {% endif %}
@@ -885,7 +887,7 @@ FORGOT_TPL = """
       <button class="btn blue" style="width:100%">✉️ Send Verification OTP to Email</button>
     </form>
 
-    <div class="muted" style="margin:14px 0 6px">{{ otp_status }}</div>
+    <div class="muted" style="margin:14px 0 6px;font-weight:700">{{ otp_status }}</div>
 
     <form method="post" action="{{ url_for('forgot_reset') }}" class="stack">
       <div>
@@ -1045,15 +1047,15 @@ ANALYTICS_TPL = """
 
 <div class="card" style="margin-bottom:14px">
   <h3>📈 Historical Trend Analysis: Previous Year vs Current Year &amp; Monthly Intake [{{ scope_title }}]</h3>
-  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px">
+  <div class="grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px">
     {% for t in trends %}
-    <div style="background:var(--card-highlight);border:1px solid var(--card-border);border-radius:9px;padding:13px">
-      <div style="font-size:12px;font-weight:700;color:var(--primary)">{{ t.title }}</div>
+    <div style="background:var(--card-highlight);border:1.5px solid var(--card-border);border-radius:9px;padding:13px">
+      <div style="font-size:12.5px;font-weight:800;color:var(--primary)">{{ t.title }}</div>
       <div class="row" style="justify-content:space-between;margin-top:6px">
-        <span style="font-size:11px;font-weight:700">Current Period: {{ t.curr }} cases</span>
-        <span class="muted">Previous Period: {{ t.prev }} cases</span>
+        <span style="font-size:11.5px;font-weight:800;color:#000000">Current Period: {{ t.curr }} cases</span>
+        <span class="muted" style="font-size:11.5px">Previous Period: {{ t.prev }} cases</span>
       </div>
-      <div style="font-size:10.5px;font-weight:700;margin-top:6px;color:{{ t.color }}">{{ t.label }}</div>
+      <div style="font-size:11px;font-weight:800;margin-top:6px;color:{{ t.color }}">{{ t.label }}</div>
     </div>
     {% endfor %}
   </div>
@@ -1300,10 +1302,10 @@ JURIS_TPL = """
       <h2>{{ detail.title }}</h2>
       <div class="muted" style="margin-bottom:12px">{{ detail.subtitle }}</div>
 
-      <div class="card" style="background:var(--card-highlight);margin-bottom:14px">
+      <div class="card" style="background:var(--card-highlight);margin-bottom:14px;border:1.5px solid var(--card-border)">
         <h3>{{ detail.officer_heading }}</h3>
         {% if detail.officer %}
-          <div style="font-size:13px;font-weight:700">Name: {{ detail.officer.name }}</div>
+          <div style="font-size:13.5px;font-weight:800;color:#000000">Name: {{ detail.officer.name }}</div>
           <div class="muted">Badge ID: #{{ detail.officer.badge }} | Rank: {{ detail.officer.rank }}</div>
           <div class="muted">Email: {{ detail.officer.email }}</div>
           {% if can_edit %}
@@ -1337,7 +1339,7 @@ JURIS_TPL = """
           <input type="hidden" name="unit_name" value="{{ detail.station_entry.unit }}">
           <input type="hidden" name="division_code" value="{{ detail.station_entry.division }}">
           <input type="hidden" name="area_zone" value="{{ detail.station_entry.area }}">
-          <button class="btn green" style="height:40px">
+          <button class="btn green" style="height:42px">
             🔓 Open Regular Station Vault (Cases, Evidence, Issue &amp; Return) ➔
           </button>
         </form>
@@ -1572,10 +1574,10 @@ def jurisdiction_city():
 AREA_DASH_TPL = """
 <div class="card">
   <h2>📍 Area / Zone Profile: {{ area_name }} ({{ div_code }})</h2>
-  <div class="card" style="background:var(--card-highlight);margin:14px 0">
+  <div class="card" style="background:var(--card-highlight);margin:14px 0;border:1.5px solid var(--card-border)">
     <h3>Assigned Assistant Commissioner of Police (ACP / DCP)</h3>
     {% if officer %}
-      <div style="font-size:13px;font-weight:700">Name: {{ officer.name }}</div>
+      <div style="font-size:13.5px;font-weight:800;color:#000000">Name: {{ officer.name }}</div>
       <div class="muted">Badge ID: #{{ officer.badge }} | Rank: {{ officer.rank }}</div>
       <div class="muted">Email: {{ officer.email }}</div>
     {% else %}
@@ -1772,7 +1774,7 @@ ENROLL_TPL = """
     <h2>👮 Enrol Junior Personnel</h2>
     <div class="muted" style="margin-bottom:12px">Authorised by: {{ u.rank }} ({{ u.name }})</div>
 
-    <div style="background:var(--primary);color:#fff;border-radius:8px;padding:11px 13px;font-size:11.5px;font-weight:700;margin-bottom:14px">
+    <div style="background:var(--primary);color:#FFFFFF;border-radius:8px;padding:11px 13px;font-size:12px;font-weight:800;margin-bottom:14px">
       {{ assignment_tag }}
     </div>
 
@@ -2003,10 +2005,10 @@ CASES_TPL = """
         </select></div>
       <div><label>Sentence / Jail Facility (Optional)</label>
         <input type="text" name="punishment" placeholder="e.g. 5 Years RI at Lajpore Central Jail"></div>
-      <button class="btn" style="width:100%;margin-top:12px;height:40px">➕ Commit &amp; Anchor Case</button>
+      <button class="btn" style="width:100%;margin-top:12px;height:42px">➕ Commit &amp; Anchor Case</button>
     </form>
 
-    <hr style="border:0;border-top:1px solid var(--card-border);margin:16px 0">
+    <hr style="border:0;border-top:1.5px solid var(--card-border);margin:16px 0">
     <h3>Official Statutory Reports</h3>
     <a class="btn dark" style="width:100%" href="{{ url_for('report_pending_cases') }}">
       📊 Print Pending Cases Summary Report
@@ -2030,7 +2032,7 @@ CASES_TPL = """
         <button class="btn small">Search</button>
         {% if q %}<a class="btn slate small" href="{{ url_for('portal', tab='cases') }}">Clear</a>{% endif %}
       </form>
-      <div style="font-size:11px;font-weight:700;color:var(--red)">
+      <div style="font-size:12px;font-weight:800;color:var(--red)">
         Station [{{ u.unit or 'All' }}] Unresolved Cases: {{ pending }} / {{ cases|length }}
       </div>
     </div>
@@ -2047,7 +2049,7 @@ CASES_TPL = """
           {% for c in cases %}
           <tr>
             <td><b>{{ c.case_no }}</b></td>
-            <td class="left">{{ c.case_name }}</td>
+            <td class="left"><b>{{ c.case_name }}</b></td>
             <td>{{ c.fir_no }}</td>
             <td>{{ c.location }}</td>
             <td>
@@ -2306,7 +2308,7 @@ WORKSPACE_TPL = """
           <input type="text" name="vault_locker" placeholder="e.g. Locker 4-B"></div>
         <div><label>Select Digital Exhibit File</label>
           <input type="file" name="evidence_file" required></div>
-        <button class="btn green" style="width:100%;margin-top:12px;height:40px">🔒 Encrypt &amp; Seal to Vault</button>
+        <button class="btn green" style="width:100%;margin-top:12px;height:42px">🔒 Encrypt &amp; Seal to Vault</button>
       </form>
     </div>
 
@@ -2332,7 +2334,7 @@ WORKSPACE_TPL = """
     <div class="card">
       <h3>Exhibit {{ preview.evidence_id }} — {{ preview.title }}</h3>
       <div class="muted">{{ preview.category }} · {{ preview.classification }}</div>
-      <div class="hash muted" style="margin-top:6px">SHA-256 Bit-Level Seal: {{ preview.sha256 }}</div>
+      <div class="hash" style="margin-top:6px;color:#000000">SHA-256 Bit-Level Seal: {{ preview.sha256 }}</div>
 
       <div class="media-frame">
         {% if preview.kind == 'image' %}
@@ -2373,7 +2375,7 @@ WORKSPACE_TPL = """
             {% for e in evidences %}
             <tr>
               <td><b>{{ e.evidence_id }}</b></td>
-              <td class="left">{{ e.title }}</td>
+              <td class="left"><b>{{ e.title }}</b></td>
               <td>{{ e.category }}</td>
               <td class="left">{{ e.classification }}</td>
               <td class="hash">{{ e.sha256[:20] }}…</td>
@@ -2596,7 +2598,7 @@ CUSTODY_TPL = """
         <input type="text" name="reason" placeholder="e.g. FSL Testing"></div>
       <div><label>Custody Duration (Days)</label>
         <input type="number" name="days" value="7" min="1"></div>
-      <button class="btn" style="width:100%;margin-top:12px;height:40px">🔒 Transfer &amp; Issue Evidence</button>
+      <button class="btn" style="width:100%;margin-top:12px;height:42px">🔒 Transfer &amp; Issue Evidence</button>
     </form>
   </div>
 
@@ -2612,7 +2614,7 @@ CUSTODY_TPL = """
           {% for t in transfers %}
           <tr>
             <td>{{ t.transfer_id }}</td><td><b>{{ t.evidence_id }}</b></td><td>{{ t.case_no }}</td>
-            <td>{{ t.badge }}</td><td class="left">{{ t.name }}</td><td>{{ t.rank }}</td>
+            <td>{{ t.badge }}</td><td class="left"><b>{{ t.name }}</b></td><td>{{ t.rank }}</td>
             <td>{{ t.checkout }}</td><td>{{ t.deadline }}</td>
             <td>{% if t.status == 'CHECKED_OUT' %}<span class="pill gold">Checked Out</span>
                 {% else %}<span class="pill green">In Vault</span>{% endif %}</td>
@@ -2758,12 +2760,12 @@ TIMELINE_TPL = """
   <h2>🔍 Interactive Journey Timeline: Evidence {{ evidence_id }}</h2>
   <div class="stack" style="margin-top:16px">
     {% for e in events %}
-      <div class="card" style="background:var(--card-highlight);border:1px solid var(--card-border)">
+      <div class="card" style="background:var(--card-highlight);border:1.5px solid var(--card-border)">
         <div class="row" style="justify-content:space-between">
-          <b>Stage {{ loop.index }}: {{ e.status }}</b>
+          <b style="color:var(--primary)">Stage {{ loop.index }}: {{ e.status }}</b>
           <span class="muted">Timestamp: {{ e.checkout }}</span>
         </div>
-        <div style="margin-top:6px;font-size:12px">
+        <div style="margin-top:6px;font-size:13px;color:#000000;font-weight:700">
           Transferred By: {{ e.from_officer }} ➔ Recipient: {{ e.to_name }} ({{ e.to_rank }})
         </div>
         <div class="muted" style="margin-top:3px">Purpose / Reason: {{ e.reason }}</div>
@@ -2845,7 +2847,7 @@ VERIFY_TPL = """
         {% for r in results %}
         <tr>
           <td><b>{{ r.evidence_id }}</b></td><td>{{ r.case_no }}</td>
-          <td class="left">{{ r.title }}</td>
+          <td class="left"><b>{{ r.title }}</b></td>
           <td class="hash">{{ r.sealed[:26] }}…</td>
           <td class="hash">{{ r.active[:26] }}{{ '…' if r.active|length > 26 }}</td>
           <td>
@@ -2958,7 +2960,7 @@ AUDIT_TPL = """
         <tr>
           <td>{{ l.log_id }}</td>
           <td class="hash">{{ l.prev_hash[:16] }}…</td>
-          <td>{{ l.timestamp }}</td><td>{{ l.actor }}</td><td>{{ l.role }}</td>
+          <td>{{ l.timestamp }}</td><td><b>{{ l.actor }}</b></td><td>{{ l.role }}</td>
           <td><span class="pill navy">{{ l.action }}</span></td>
           <td class="left">{{ l.target }}</td><td>{{ l.ip }}</td>
           <td class="hash">{{ l.log_hash[:16] }}…</td>
@@ -3010,9 +3012,9 @@ def _pdf_styles():
     styles = getSampleStyleSheet()
     return {
         "title": ParagraphStyle("TStyle", parent=styles["Heading1"], fontSize=14, alignment=1, textColor=colors.HexColor("#1E3A8A")),
-        "sub": ParagraphStyle("SubStyle", parent=styles["Normal"], fontSize=9, alignment=1, textColor=colors.HexColor("#475569")),
+        "sub": ParagraphStyle("SubStyle", parent=styles["Normal"], fontSize=9, alignment=1, textColor=colors.HexColor("#1E293B")),
         "h2": ParagraphStyle("H2Style", parent=styles["Heading2"], fontSize=11, textColor=colors.HexColor("#1E3A8A")),
-        "body": ParagraphStyle("BStyle", parent=styles["Normal"], fontSize=8.5, leading=12, textColor=colors.HexColor("#0F172A")),
+        "body": ParagraphStyle("BStyle", parent=styles["Normal"], fontSize=8.5, leading=12, textColor=colors.HexColor("#000000")),
         "normal": styles["Normal"],
     }
 
@@ -3063,9 +3065,10 @@ def report_case_dossier(case_no):
     t_meta = Table(meta_data, colWidths=[130, 140, 130, 140])
     t_meta.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#94A3B8")),
         ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
         ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
         ('FONTSIZE', (0, 0), (-1, -1), 8),
         ('PADDING', (0, 0), (-1, -1), 5),
     ]))
@@ -3085,7 +3088,7 @@ def report_case_dossier(case_no):
             t_ex = Table(exhibit_meta, colWidths=[260, 280])
             t_ex.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#94A3B8")),
                 ('PADDING', (0, 0), (-1, -1), 4),
                 ('SPAN', (0, 2), (1, 2)),
             ]))
@@ -3179,6 +3182,7 @@ def report_pending_cases():
         ('FONTSIZE', (0, 0), (-1, -1), 7.5),
         ('PADDING', (0, 0), (-1, -1), 4),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
     ]))
     elements.append(t_p)
     doc.build(elements)
@@ -3221,7 +3225,8 @@ def report_65b(evidence_id):
     t = Table(cert_data, colWidths=[180, 360])
     t.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#94A3B8")),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
         ('PADDING', (0, 0), (-1, -1), 6),
     ]))
     elements += [t, Spacer(1, 20), Paragraph(
@@ -3280,46 +3285,53 @@ if is_running_in_streamlit():
     st.markdown(f"""
         <style>
             #MainMenu, header, footer {{ visibility: hidden; }}
-            .block-container {{ padding: 1.5rem 2.5rem; background-color: {THEME['bg_main']}; }}
+            .block-container {{ padding: 1.5rem 2.5rem; background-color: {THEME['bg_main']}; color: #000000 !important; }}
             .mha-card {{
                 background-color: {THEME['card_bg']};
-                border: 1px solid {THEME['card_border']};
+                border: 1.5px solid {THEME['card_border']};
                 border-radius: 14px;
                 padding: 24px;
-                box-shadow: 0 4px 16px rgba(0,0,0,0.04);
+                box-shadow: 0 4px 16px rgba(0,0,0,0.06);
                 margin-bottom: 20px;
+                color: #000000 !important;
             }}
             .mha-header {{
-                color: {THEME['primary']};
+                color: {THEME['primary']} !important;
                 font-family: 'Segoe UI', sans-serif;
-                font-weight: 800;
+                font-weight: 900;
                 font-size: 20px;
                 margin-bottom: 4px;
             }}
             .mha-sub {{
-                color: {THEME['text_muted']};
-                font-size: 12px;
+                color: {THEME['text_muted']} !important;
+                font-size: 13px;
+                font-weight: 700;
                 margin-bottom: 18px;
             }}
             .pill {{
                 display: inline-block;
-                padding: 3px 10px;
+                padding: 4px 10px;
                 border-radius: 12px;
                 font-size: 11px;
-                font-weight: 700;
-                color: #fff;
+                font-weight: 800;
+                color: #fff !important;
             }}
             .pill.navy {{ background-color: {THEME['primary']}; }}
             .pill.green {{ background-color: {THEME['accent_green']}; }}
             .pill.gold {{ background-color: {THEME['accent_gold']}; }}
             .stButton>button {{
-                font-weight: 700;
+                font-weight: 800;
                 border-radius: 8px;
+            }}
+            div[data-testid="stMarkdownContainer"] p,
+            div[data-testid="stMarkdownContainer"] span,
+            div[data-testid="stMarkdownContainer"] label {{
+                color: #000000 !important;
+                font-weight: 600;
             }}
         </style>
     """, unsafe_allow_html=True)
 
-    # Portal Rendering in Streamlit Cloud
     if not st.session_state.user:
         st.markdown("""
             <div style="text-align: center; margin-bottom: 24px;">
@@ -3333,14 +3345,14 @@ if is_running_in_streamlit():
             st.markdown(f"""
                 <div style="background: linear-gradient(135deg, {THEME['hero_gradient']}, {THEME['hero_gradient_dark']});
                             color: white; border-radius: 18px; padding: 40px 32px; height: 100%; min-height: 480px;">
-                    <div style="background: #3B82F6; color: white; display: inline-block; padding: 4px 14px;
+                    <div style="background: #2563EB; color: white; display: inline-block; padding: 4px 14px;
                                 border-radius: 15px; font-weight: 800; font-size: 11px; margin-bottom: 16px;">
                         {'JUDICIAL INSPECTION ACCESS' if st.session_state.view_mode == 'judicial' else 'STAGE 1 — HIERARCHY GATEWAY'}
                     </div>
-                    <h2 style="color: white; font-size: 24px; font-weight: 800; margin-bottom: 12px;">
+                    <h2 style="color: white; font-size: 24px; font-weight: 900; margin-bottom: 12px;">
                         {'Judicial & Prosecution Portal' if st.session_state.view_mode == 'judicial' else 'Law Enforcement Login'}
                     </h2>
-                    <p style="color: #EFF6FF; font-size: 13px; line-height: 1.6;">
+                    <p style="color: #EFF6FF; font-size: 13px; line-height: 1.6; font-weight: 500;">
                         {'Read-only evidence manifest inspection and live tamper hash verification under Section 65B/63.' if st.session_state.view_mode == 'judicial' else
                          'Select your designated police post/rank first. Your jurisdiction is securely linked directly to your database badge ID. No redundant location inputs required.'}
                     </p>
@@ -3452,7 +3464,7 @@ if is_running_in_streamlit():
         m4.metric("Economic & Hawala", "2", "Fraud Track")
 
         st.write("---")
-        st.markdown(f'<div style="font-weight:700; color:{THEME["primary"]}; margin-bottom:12px;">🔍 Crime Category Distribution Breakdown</div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="font-weight:800; color:{THEME["primary"]}; margin-bottom:12px;">🔍 Crime Category Distribution Breakdown</div>', unsafe_allow_html=True)
         st.progress(0.2, text="🔴 Murder / Homicide (20%)")
         st.progress(0.3, text="🟡 Robbery / Theft / Heist (30%)")
         st.progress(0.2, text="🔵 Cyber & Ransomware (20%)")
@@ -3466,8 +3478,8 @@ if is_running_in_streamlit():
             <div style="background: white; border-bottom: 2px solid {THEME['primary']}; padding: 12px 20px; border-radius: 10px; margin-bottom: 16px;">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <div>
-                        <span style="font-size: 16px; font-weight: 800; color: {THEME['primary']};">NyayaVault: PS-190 Evidence Lifecycle System</span>
-                        <div style="font-size: 12px; color: {THEME['accent_green']}; font-weight: 600; margin-top: 2px;">
+                        <span style="font-size: 16px; font-weight: 900; color: {THEME['primary']};">NyayaVault: PS-190 Evidence Lifecycle System</span>
+                        <div style="font-size: 12.5px; color: {THEME['accent_green']}; font-weight: 800; margin-top: 2px;">
                             Rank: {u['rank']} | Officer: {u['name']} (#{u['badge']}) | Station: {u['unit']}
                         </div>
                     </div>
