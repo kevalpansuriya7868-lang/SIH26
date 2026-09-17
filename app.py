@@ -2465,8 +2465,11 @@ class MHADocManager(ctk.CTk):
 
             if search_query:
                 q = f"%{search_query.upper()}%"
-                where_clause += f" AND (UPPER(c.case_no) LIKE ? OR UPPER(c.case_name) LIKE ? OR UPPER(c.fir_no) LIKE ? OR UPPER(c.crime_location) LIKE ? OR UPPER(c.unit_name) LIKE ? OR UPPER(c.division_code) LIKE ?)"
-                params.extend([q, q, q, q, q, q])
+                base_idx = len(params)
+                like_cols = ["c.case_no", "c.case_name", "c.fir_no", "c.crime_location", "c.unit_name", "c.division_code"]
+                like_clause = " OR ".join(f"UPPER({col}) LIKE :{base_idx + i + 1}" for i, col in enumerate(like_cols))
+                where_clause += f" AND ({like_clause})"
+                params.extend([q] * len(like_cols))
 
             formatted_sql = f"""
                 SELECT c.case_no, c.case_name, c.fir_no, c.crime_location, c.case_condition, c.punishment_details, c.division_code, c.area_zone, c.unit_name, 
@@ -2476,10 +2479,6 @@ class MHADocManager(ctk.CTk):
                 WHERE {where_clause}
                 ORDER BY c.created_at DESC
             """
-            
-            for idx in range(len(params)):
-                if "?" in formatted_sql:
-                    formatted_sql = formatted_sql.replace("?", f":{idx+1}", 1)
 
             cur.execute(formatted_sql, params)
             rows = cur.fetchall()
@@ -3044,7 +3043,7 @@ class MHADocManager(ctk.CTk):
             self.custody_table.column(c, width=125, minwidth=95, anchor="center")
 
         c_v_scroll.pack(side="right", fill="y")
-        h_scroll.pack(side="bottom", fill="x")
+        c_h_scroll.pack(side="bottom", fill="x")
         self.custody_table.pack(fill="both", expand=True, padx=(12, 0), pady=(0, 10))
         self.custody_table.bind("<Double-1>", lambda e: self.show_visual_custody_timeline_modal())
 
