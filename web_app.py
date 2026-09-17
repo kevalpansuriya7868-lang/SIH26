@@ -3516,7 +3516,77 @@ def preflight():
     print("  Press CTRL+C to stop the server.\n")
 
 
-if __name__ == "__main__":
-    preflight()
-    # host="0.0.0.0" lets other machines on the police intranet reach the vault.
-    app.run(host="0.0.0.0", port=5000, debug=False)
+def is_running_in_streamlit():
+    if any("streamlit" in str(arg).lower() for arg in sys.argv):
+        return True
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        return get_script_run_ctx() is not None
+    except Exception:
+        pass
+    return False
+
+
+if is_running_in_streamlit():
+    # 1. Attach Flask WSGI Container to Streamlit's Tornado server
+    try:
+        from streamlit.web.server.server import Server
+    except ImportError:
+        try:
+            from streamlit.server.server import Server
+        except ImportError:
+            Server = None
+
+    if Server is not None:
+        try:
+            server = Server.get_current()
+            if server and hasattr(server, "_app"):
+                import tornado.wsgi
+                from tornado.routing import Rule, PathMatches
+
+                router = getattr(server._app, "default_router", getattr(server._app, "wildcard_router", None))
+                if router and hasattr(router, "rules"):
+                    if not any(getattr(r, "_is_nyaya_wsgi", False) for r in router.rules):
+                        wsgi_handler = tornado.wsgi.WSGIContainer(app)
+                        rule = Rule(PathMatches(r"^(?!/(_stcore|static)).*"), wsgi_handler)
+                        rule._is_nyaya_wsgi = True
+                        router.rules.insert(0, rule)
+        except Exception:
+            pass
+
+    # 2. Render the initial Gateway UI directly into Streamlit
+    try:
+        import streamlit as st
+        import streamlit.components.v1 as components
+
+        st.set_page_config(
+            page_title="NyayaVault — Ministry of Home Affairs",
+            layout="wide",
+            initial_sidebar_state="collapsed"
+        )
+        st.markdown(
+            """
+            <style>
+            #MainMenu {visibility: hidden;}
+            header {visibility: hidden;}
+            footer {visibility: hidden;}
+            .block-container {padding: 0 !important; margin: 0 !important; max-width: 100% !important;}
+            iframe {border: none !important; width: 100% !important;}
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
+
+        with app.test_request_context("/"):
+            gateway_html = render_page(GATEWAY_TPL, "Authentication gateway",
+                                       view="officer", positions=LOGIN_POSITIONS)
+
+        components.html(gateway_html, height=920, scrolling=True)
+    except Exception:
+        pass
+
+else:
+    if __name__ == "__main__":
+        preflight()
+        # host="0.0.0.0" lets other machines on the police intranet reach the vault.
+        app.run(host="0.0.0.0", port=5000, debug=False)
