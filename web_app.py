@@ -285,26 +285,44 @@ def get_client_ip():
     return request.remote_addr or "127.0.0.1"
 
 
+def auto_local_prefixes():
+    """
+    The subnet this server itself sits on, derived at runtime.
+
+    A police station's intranet range is not known in advance, and a laptop
+    joining a different network gets a different private IP every time. Rather
+    than hand-editing config.json for each network, the server's own /24 is
+    trusted automatically alongside whatever config.json lists. Set
+    security.trust_local_subnet to false to disable this and rely purely on
+    the configured prefixes.
+    """
+    prefixes = ["127.0.0.1", "::1"]
+    if SECURITY_CONFIG.get("trust_local_subnet", True):
+        parts = get_local_ip().split(".")
+        if len(parts) == 4 and all(p.isdigit() for p in parts):
+            prefixes.append(".".join(parts[:3]) + ".")   # e.g. 10.194.87.
+    return prefixes
+
+
 def verify_mha_network():
     """
     Desktop build checked the machine's own NIC. On the web the meaningful
     check is the requesting client, so remote_addr is tested against the
-    same allowed_subnets prefixes in config.json.
+    allowed_subnets prefixes in config.json plus this server's own subnet.
     """
     if not SECURITY_CONFIG.get("enforce_mha_subnet", False):
         return True, None
 
-    allowed = SECURITY_CONFIG.get("allowed_subnets", ["127.0.0.1"])
-    candidates = [get_client_ip(), get_local_ip()]
+    allowed = list(SECURITY_CONFIG.get("allowed_subnets", ["127.0.0.1"])) + auto_local_prefixes()
+    client_ip = get_client_ip()
 
-    for ip in candidates:
-        for prefix in allowed:
-            if ip.startswith(prefix) or ip == prefix:
-                return True, None
+    for prefix in allowed:
+        if client_ip.startswith(prefix) or client_ip == prefix:
+            return True, None
 
     return False, (
-        f"Unauthorized Network Node: {', '.join(candidates)} — this system is "
-        "strictly restricted to the secure MHA/Police Intranet."
+        f"Unauthorized network node: {client_ip}. This system is restricted to the "
+        f"secure MHA / police intranet. Permitted ranges: {', '.join(sorted(set(allowed)))}."
     )
 
 
@@ -3436,14 +3454,69 @@ def inject_globals():
     return {"THEME": THEME, "now": datetime.now()}
 
 
+def preflight():
+    """Check the environment before serving, so failures are readable instead of stack traces."""
+    problems = []
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM vault_system_users")
+        user_count = cur.fetchone()[0]
+        cur.close()
+        conn.close()
+        db_state = f"connected — {user_count} officer accounts"
+    except Exception as e:
+        first_line = str(e).strip().splitlines()[0][:110]
+        db_state = f"UNREACHABLE — {first_line}"
+        problems.append(
+            "Oracle is not reachable. Confirm the OracleServiceXE and "
+            "OracleOraDB21Home1TNSListener services are running, that the password in "
+            "config.json is correct, and that Local_SIH26.sql has been executed."
+        )
+
+    if not os.path.isdir(VAULT_STORAGE_DIR):
+        problems.append(f"Vault storage directory is missing: {VAULT_STORAGE_DIR}")
+
+    chain_state = "disabled in config.json"
+    if BLOCKCHAIN_CONFIG.get("enabled"):
+        if not BLOCKCHAIN_MODULE_AVAILABLE:
+            chain_state = "enabled but web3 / py-solc-x is not installed — anchoring will be skipped"
+        elif not BLOCKCHAIN_CONFIG.get("contract_address"):
+            chain_state = "enabled but no contract_address — run: python blockchain_manager.py"
+        else:
+            chain_state = f"enabled — contract {BLOCKCHAIN_CONFIG['contract_address'][:16]}…"
+
+    lan_ip = get_local_ip()
+    if SECURITY_CONFIG.get("enforce_mha_subnet"):
+        allowed = list(SECURITY_CONFIG.get("allowed_subnets", [])) + auto_local_prefixes()
+        subnet_state = "enforced — permitted: " + ", ".join(sorted(set(allowed)))
+    else:
+        subnet_state = "open to any network"
+
+    print("=" * 72)
+    print("  NyayaVault Web — Ministry of Home Affairs (PS-190)")
+    print("=" * 72)
+    print(f"  Oracle       : {db_state}")
+    print(f"  Blockchain   : {chain_state}")
+    print(f"  Vault store  : {VAULT_STORAGE_DIR}")
+    print(f"  Subnet policy: {subnet_state}")
+    print("-" * 72)
+    print(f"  This computer     ->  http://127.0.0.1:5000")
+    print(f"  Same Wi-Fi / LAN  ->  http://{lan_ip}:5000")
+    print("=" * 72)
+
+    for p in problems:
+        print(f"  [!] {p}")
+    if problems:
+        print("-" * 72)
+        print("  The server will still start so you can read the error in the browser.")
+        print("=" * 72)
+
+    print("  Press CTRL+C to stop the server.\n")
+
+
 if __name__ == "__main__":
-    print("=" * 64)
-    print(" NyayaVault Web — Ministry of Home Affairs (PS-190)")
-    print(" Vault storage :", VAULT_STORAGE_DIR)
-    print(" Oracle target :", f"{DB_CONFIG.get('host')}:{DB_CONFIG.get('port')}/{DB_CONFIG.get('service_name')}")
-    print(" Blockchain    :", "enabled" if (BLOCKCHAIN_MODULE_AVAILABLE and BLOCKCHAIN_CONFIG.get("enabled")) else "disabled")
-    print(" Subnet policy :", "enforced" if SECURITY_CONFIG.get("enforce_mha_subnet") else "open")
-    print(" Open          : http://127.0.0.1:5000")
-    print("=" * 64)
+    preflight()
     # host="0.0.0.0" lets other machines on the police intranet reach the vault.
     app.run(host="0.0.0.0", port=5000, debug=False)
