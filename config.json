@@ -7,9 +7,10 @@
     "service_name": "xe"
   },
   "security": {
-    "jwt_secret": "MHA_VAULT_SUPER_SECURE_2026_LEGAL_TOKEN",
+    "jwt_secret": "NyayaVault@GovernmentOfIndia#MHA2026MasterKey",
     "token_expire_hours": 8,
-    "enforce_mha_subnet": true,
+    "enforce_mha_subnet": false,
+    "trust_local_subnet": true,
     "allowed_subnets": [
       "127.0.0.1",
       "172.16.",
@@ -20,18 +21,18 @@
   },
   "vault_master_key": "NyayaVault@GovernmentOfIndia#MHA2026MasterKey",
   "smtp": {
-    "enabled": true,
+    "enabled": false,
     "server": "smtp.gmail.com",
     "port": 587,
-    "user": "kevalkumarpansuriya.co25d3@scet.ac.in",
-    "password": "zwjxmcpeyhfycxwc"
+    "user": "nyayavault.mha@gmail.com",
+    "password": "app_password_here"
   },
   "blockchain": {
-    "enabled": true,
+    "enabled": false,
     "rpc_url": "http://127.0.0.1:8545",
     "chain_id": 1337,
     "gas_limit": 3000000,
-    "contract_address": "0xe415b853555dAfF57487952a3572D9904C956882",
-    "deployer_private_key": "0xc4b3b9d4af3c25de6306671a44860dd19e1752009036eb7e3ca07dfd6b418618"
+    "contract_address": "",
+    "deployer_private_key": ""
   }
 }
