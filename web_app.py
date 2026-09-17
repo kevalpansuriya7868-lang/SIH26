@@ -126,7 +126,7 @@ SECURITY_CONFIG = config.get("security", {})
 MASTER_SALT = b"MHA_NYAYAVAULT_KEY_DERIVATION_SALT_2026"
 
 # ---------------------------------------------------------------------------
-# Core Cryptographic & AI Engines (Ported Directly from app.py)
+# Core Cryptographic & AI Engines
 # ---------------------------------------------------------------------------
 class EncryptionEngine:
     @staticmethod
@@ -196,7 +196,7 @@ def get_network_ip():
         return "127.0.0.1"
 
 # ---------------------------------------------------------------------------
-# Cryptographic Chained Audit Logging (Ported Exactly from app.py)
+# Cryptographic Chained Audit Logging
 # ---------------------------------------------------------------------------
 def log_chained_audit_event(action_type, target_ref):
     ip = get_network_ip()
@@ -204,7 +204,6 @@ def log_chained_audit_event(action_type, target_ref):
     role = st.session_state.get("role", "SECURITY_GATEWAY")
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Fetch previous log hash from session state audit chain
     if "audit_logs" not in st.session_state or len(st.session_state.audit_logs) == 0:
         prev_hash = "0000000000000000000000000000000000000000000000000000000000000000"
     else:
@@ -230,7 +229,7 @@ def log_chained_audit_event(action_type, target_ref):
     st.session_state.audit_logs.append(log_entry)
 
 # ---------------------------------------------------------------------------
-# Session State Initialization (Hierarchies, Cases, Custody & Logs)
+# Session State Initialization & Backwards-Compatibility Normalizer
 # ---------------------------------------------------------------------------
 if "hierarchy_db" not in st.session_state:
     st.session_state.hierarchy_db = {
@@ -250,7 +249,6 @@ if "hierarchy_db" not in st.session_state:
         }
     }
 
-# Default sample exhibit initialization
 SAMPLE_EVID_FILE = "CR_KTG_2026_012_EV_CCTV_01.nyayavault"
 sample_file_path = os.path.join(VAULT_STORAGE_DIR, SAMPLE_EVID_FILE)
 sample_plain = b"MHA_VAULT_SECURE_PAYLOAD: CCTV Footages recovered from Katargam Bank perimeter surveillance camera."
@@ -295,6 +293,37 @@ if "cases_db" not in st.session_state:
         ]
     }
 
+# Normalize any existing session-state cases that might have legacy keys ("Scene", "Status", etc.)
+for stn, cases_list in st.session_state.cases_db.items():
+    for cs in cases_list:
+        if "Location" not in cs:
+            cs["Location"] = cs.get("Scene", "Katargam, Surat")
+        if "Condition" not in cs:
+            cs["Condition"] = cs.get("Status", "Under Investigation")
+        if "Punishment" not in cs:
+            cs["Punishment"] = "Pending Trial / No Conviction Yet"
+        if "Category" not in cs:
+            cs["Category"] = "General Offense"
+        if "Registered By" not in cs:
+            cs["Registered By"] = cs.get("IO", "Investigating Officer")
+        if "Exhibits" not in cs:
+            cs["Exhibits"] = []
+            if "Evidence File" in cs and cs["Evidence File"]:
+                cs["Exhibits"].append({
+                    "Evidence ID": "EV-01",
+                    "Title": "Initial Evidence File",
+                    "Category": "Digital Exhibit",
+                    "Classification": "Electronic Record",
+                    "Encrypted File": cs["Evidence File"],
+                    "Raw File": cs["Evidence File"],
+                    "File Type": cs.get("File Type", "text"),
+                    "SHA256": "PRE_EXISTING_DIGEST",
+                    "Locker": "Shelf 1",
+                    "Active Custody": "VAULT",
+                    "Uploaded At": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "Notes": cs.get("Details", "")
+                })
+
 if "custody_ledger" not in st.session_state:
     st.session_state.custody_ledger = [
         {
@@ -330,7 +359,6 @@ if "audit_logs" not in st.session_state:
 if "tampered_exhibits" not in st.session_state:
     st.session_state.tampered_exhibits = set()
 
-# State persistence for breadcrumb navigation
 for k in ["nav_city", "nav_area", "nav_station", "selected_case"]:
     if k not in st.session_state:
         st.session_state[k] = None
@@ -413,7 +441,6 @@ if not st.session_state.authenticated:
             st.sidebar.error("Invalid badge ID or cryptographic credentials.")
     st.stop()
 
-# Authenticated Session Banner in Sidebar
 st.sidebar.success(f"● Authenticated: {st.session_state.get('officer_name')}")
 st.sidebar.info(f"**Rank:** {st.session_state.get('rank')}\n\n**Badge:** `#{st.session_state.get('user')}`")
 if st.sidebar.button("🔒 Sign Out Session", use_container_width=True):
@@ -426,7 +453,7 @@ if st.sidebar.button("🔒 Sign Out Session", use_container_width=True):
     st.rerun()
 
 # ---------------------------------------------------------------------------
-# Statutory PDF Report Generation Helpers (Direct Port from app.py)
+# Statutory PDF Report Generation Helpers
 # ---------------------------------------------------------------------------
 def generate_section65b_pdf(case_no, case_title, fir_no, exhibit):
     buffer = io.BytesIO()
@@ -486,9 +513,9 @@ def generate_case_dossier_pdf(case_record):
 
     meta_data = [
         ["Master Case Number:", case_record["Case No"], "FIR Reference:", case_record["FIR"]],
-        ["Incident Title:", case_record["Title"], "Crime Location:", case_record["Location"]],
-        ["Investigating Officer:", case_record["IO"], "Condition / Status:", case_record["Condition"]],
-        ["Judicial Verdict / Jail:", case_record["Punishment"], "Registered By:", case_record["Registered By"]],
+        ["Incident Title:", case_record["Title"], "Crime Location:", case_record.get("Location", case_record.get("Scene", "N/A"))],
+        ["Investigating Officer:", case_record.get("IO", "N/A"), "Condition / Status:", case_record.get("Condition", case_record.get("Status", "N/A"))],
+        ["Judicial Verdict / Jail:", case_record.get("Punishment", "Pending Trial"), "Registered By:", case_record.get("Registered By", "Police Officer")],
         ["Sealing & Export Stamp:", datetime.now().strftime('%Y-%m-%d %H:%M:%S'), "Authority:", f"{st.session_state.get('rank')} #{st.session_state.get('user')}"]
     ]
     t_meta = Table(meta_data, colWidths=[130, 140, 130, 140])
@@ -548,9 +575,7 @@ with tabs[0]:
     if is_judge:
         st.info("⚖️ **Judicial Inspection Portal:** Read-only statutory manifest. Tamper hashes and custody ledgers are certified for inspection.")
 
-    # -----------------------------------------------------------------------
-    # VIEW A: CASE WORKSPACE (INCLUDES EVIDENCE INGESTION & DECRYPTION VIEW)
-    # -----------------------------------------------------------------------
+    # VIEW A: CASE WORKSPACE
     if st.session_state.selected_case is not None:
         station_cases = st.session_state.cases_db.get(st.session_state.nav_station, [])
         active_case = next((c for c in station_cases if c["Case No"] == st.session_state.selected_case), None)
@@ -574,21 +599,25 @@ with tabs[0]:
             st.markdown(f"## 📂 Case Workspace: `{active_case['Case No']}`")
             st.markdown(f"### {active_case['Title']}")
 
+            loc_val = active_case.get("Location", active_case.get("Scene", "N/A"))
+            cond_val = active_case.get("Condition", active_case.get("Status", "Under Investigation"))
+            punish_val = active_case.get("Punishment", "Pending Trial / No Conviction Yet")
+
             c1, c2, c3 = st.columns(3)
             c1.markdown(f"**FIR Ref:** `{active_case['FIR']}`\n\n**Category:** {active_case.get('Category', 'Offense')}")
-            c2.markdown(f"**Location:** {active_case['Location']}\n\n**Status:** `{active_case['Condition']}`")
-            c3.markdown(f"**Investigating Officer:** {active_case['IO']}\n\n**Verdict / Facility:** {active_case['Punishment']}")
+            c2.markdown(f"**Location:** {loc_val}\n\n**Status:** `{cond_val}`")
+            c3.markdown(f"**Investigating Officer:** {active_case.get('IO', 'N/A')}\n\n**Verdict / Facility:** {punish_val}")
 
             st.markdown("---")
 
-            # EVIDENCE INGESTION FORM (ENTER EVIDENCE DIRECTLY INSIDE WORKSPACE)
+            # Ingest evidence
             if not is_judge:
                 st.subheader("📥 Ingest & Encrypt New Evidence Exhibit")
                 with st.expander("➕ Open Evidence Ingestion Console", expanded=False):
                     with st.form(f"ingest_ev_form_{active_case['Case No']}"):
                         f_col1, f_col2 = st.columns(2)
                         with f_col1:
-                            new_eid = st.text_input("Evidence Exhibit ID", value=f"EV-EX-{len(active_case['Exhibits']) + 1:02d}")
+                            new_eid = st.text_input("Evidence Exhibit ID", value=f"EV-EX-{len(active_case.get('Exhibits', [])) + 1:02d}")
                             new_etitle = st.text_input("Evidence Exhibit Name / Title", placeholder="e.g. CCTV Surveillance Dump / Blood Spatter Photo")
                             new_elocker = st.text_input("Physical Evidence Shelf / Locker", value="Secure Locker Alpha-3")
                         with f_col2:
@@ -600,17 +629,15 @@ with tabs[0]:
                     if submit_ev:
                         if not new_eid.strip() or not new_etitle.strip():
                             st.error("Evidence ID and Title are mandatory fields.")
-                        elif any(ex["Evidence ID"].upper() == new_eid.strip().upper() for ex in active_case["Exhibits"]):
+                        elif any(ex["Evidence ID"].upper() == new_eid.strip().upper() for ex in active_case.get("Exhibits", [])):
                             st.error(f"Exhibit ID '{new_eid.strip().upper()}' is already used in this docket. Enter a unique ID.")
                         else:
-                            # Classify payload
                             file_name = uploaded_ev_file.name if uploaded_ev_file else f"{new_eid}.txt"
                             raw_payload = uploaded_ev_file.read() if uploaded_ev_file else (new_enotes.encode("utf-8") if new_enotes else b"MHA_EMPTY_PAYLOAD")
 
                             cat, classification, extracted_meta = IntelligentClassifier.analyze_evidence(file_name, raw_payload)
                             f_sha256 = hashlib.sha256(raw_payload).hexdigest()
 
-                            # Symmetric AES-256 Encryption at Rest
                             enc_payload = EncryptionEngine.encrypt_payload(raw_payload)
                             safe_name = f"{st.session_state.nav_station.replace(' ', '_')}_{active_case['Case No'].replace('/', '_')}_{new_eid.strip()}_{f_sha256[:8]}.nyayavault"
                             target_save_path = os.path.join(VAULT_STORAGE_DIR, safe_name)
@@ -645,9 +672,10 @@ with tabs[0]:
                                 "Notes": new_enotes.strip()
                             }
 
+                            if "Exhibits" not in active_case:
+                                active_case["Exhibits"] = []
                             active_case["Exhibits"].append(new_ex_record)
 
-                            # Log initial custody ledger movement
                             next_tid = len(st.session_state.custody_ledger) + 1001
                             st.session_state.custody_ledger.append({
                                 "Transfer ID": next_tid,
@@ -669,12 +697,13 @@ with tabs[0]:
 
                 st.markdown("---")
 
-            # EXHIBITS VIEWING, VERIFICATION, LIVE PLAYBACK & SECTION 65B GENERATION
+            # Exhibits list
             st.subheader("🔓 Attached Evidence Exhibits (Decryption, Audit & Inspection)")
-            if len(active_case["Exhibits"]) == 0:
+            exhibits_list = active_case.get("Exhibits", [])
+            if len(exhibits_list) == 0:
                 st.warning("No digital evidence exhibits registered for this case docket yet.")
             else:
-                for idx, ex in enumerate(active_case["Exhibits"]):
+                for idx, ex in enumerate(exhibits_list):
                     with st.container():
                         e_col1, e_col2 = st.columns([3, 1])
                         with e_col1:
@@ -693,7 +722,6 @@ with tabs[0]:
                                 key=f"cert_dl_{active_case['Case No']}_{ex['Evidence ID']}_{idx}"
                             )
 
-                        # Decrypt and render inline
                         target_fpath = os.path.join(VAULT_STORAGE_DIR, ex["Encrypted File"])
                         if os.path.exists(target_fpath):
                             if st.button(f"👁️ Decrypt & Inspect Exhibit {ex['Evidence ID']}", key=f"dec_btn_{active_case['Case No']}_{ex['Evidence ID']}_{idx}"):
@@ -711,7 +739,6 @@ with tabs[0]:
 
                                     log_chained_audit_event("EVIDENCE_DECRYPTED_VIEW", f"Exhibit {ex['Evidence ID']} in Case {active_case['Case No']} decrypted for inspection.")
 
-                                    # Render based on media type
                                     ftype = ex.get("File Type", "text")
                                     if ftype == "image":
                                         st.image(decrypted_bytes, caption=f"Exhibit {ex['Evidence ID']} ({ex['Title']})", use_container_width=True)
@@ -721,14 +748,14 @@ with tabs[0]:
                                         st.audio(decrypted_bytes)
                                     else:
                                         try:
-                                            st.text_area(f"Decrypted Content ({ex['Raw File']}):", value=decrypted_bytes.decode("utf-8"), height=150)
+                                            st.text_area(f"Decrypted Content ({ex.get('Raw File', 'Payload')}):", value=decrypted_bytes.decode("utf-8"), height=150)
                                         except Exception:
                                             st.info(f"Binary Forensic Image Payload: {len(decrypted_bytes)} bytes ready for analysis.")
 
                                     st.download_button(
                                         label=f"📥 Download Decrypted Exhibit Payload",
                                         data=decrypted_bytes,
-                                        file_name=f"Decrypted_{ex['Evidence ID']}_{ex['Raw File']}",
+                                        file_name=f"Decrypted_{ex['Evidence ID']}_{ex.get('Raw File', 'file.bin')}",
                                         key=f"dl_raw_{active_case['Case No']}_{ex['Evidence ID']}_{idx}"
                                     )
                                 except Exception as err:
@@ -738,9 +765,7 @@ with tabs[0]:
 
                         st.markdown("---")
 
-    # -----------------------------------------------------------------------
     # VIEW B: POLICE STATION REPOSITORY
-    # -----------------------------------------------------------------------
     elif st.session_state.nav_station:
         st.markdown(f"### 🏢 Police Station Vault: **[{st.session_state.nav_station}]**")
         st.info(f"Command Jurisdiction: **{st.session_state.nav_city}** Commissionerate ➔ **{st.session_state.nav_area}**")
@@ -756,8 +781,10 @@ with tabs[0]:
             for idx, sc in enumerate(st_cases):
                 col_info, col_btn = st.columns([4, 1])
                 ex_count = len(sc.get("Exhibits", []))
+                cond_str = sc.get("Condition", sc.get("Status", "Under Investigation"))
+                io_str = sc.get("IO", "N/A")
                 with col_info:
-                    st.markdown(f"**Case No:** `{sc['Case No']}` | **Title:** {sc['Title']} | **IO:** {sc['IO']} | **Status:** `{sc['Condition']}` | **Exhibits Attached:** `{ex_count}`")
+                    st.markdown(f"**Case No:** `{sc['Case No']}` | **Title:** {sc['Title']} | **IO:** {io_str} | **Status:** `{cond_str}` | **Exhibits Attached:** `{ex_count}`")
                 with col_btn:
                     if st.button(f"📂 Open Case Workspace", key=f"open_case_{sc['Case No']}_{idx}", use_container_width=True):
                         st.session_state.selected_case = sc["Case No"]
@@ -810,9 +837,7 @@ with tabs[0]:
                     st.success(f"Case '{new_c_no.strip()}' committed. Open its workspace to attach evidence exhibits.")
                     st.rerun()
 
-    # -----------------------------------------------------------------------
     # VIEW C: AREA / ZONE SELECTION LEVEL
-    # -----------------------------------------------------------------------
     elif st.session_state.nav_area:
         st.markdown(f"### 📍 City: **{st.session_state.nav_city}** ➔ Area/Zone: **{st.session_state.nav_area}**")
         if st.button("⬅️ Back to City Divisions"):
@@ -826,26 +851,23 @@ with tabs[0]:
                 st.session_state.nav_station = stn
                 st.rerun()
 
-    # -----------------------------------------------------------------------
     # VIEW D: CITY SELECTION LEVEL
-    # -----------------------------------------------------------------------
     elif st.session_state.nav_city:
-        st.markdown(f"### 🏙️ City Commissionerate: **{st.session_state.nav_city}**")
+        target_city = st.session_state.nav_city
+        st.markdown(f"### 🏙️ City Commissionerate: **{target_city}**")
         if auth_level >= 5 or is_judge:
             if st.button("⬅️ Back to State Cities"):
                 st.session_state.nav_city = None
                 st.rerun()
 
         st.markdown("#### Select an Area / Zone Jurisdiction:")
-        zones = state_tree[st.session_state.nav_city]
+        zones = state_tree[target_city]
         for zone in zones.keys():
             if st.button(f"📍 Area / Zone: {zone}", key=f"zone_btn_{zone}", use_container_width=True):
                 st.session_state.nav_area = zone
                 st.rerun()
 
-    # -----------------------------------------------------------------------
     # VIEW E: STATE ROOT LEVEL
-    # -----------------------------------------------------------------------
     else:
         if auth_level >= 5 or is_judge:
             st.success("👑 State Command Center: Direct jurisdiction drill-down across all state commissionerates.")
@@ -860,7 +882,7 @@ with tabs[0]:
             st.rerun()
 
 # ===========================================================================
-# TAB 2: MASTER CASE REPOSITORY & DOSSIER EXPORT
+# TAB 2: MASTER CASE REPOSITORY & SAFE DICTIONARY LOOKUPS
 # ===========================================================================
 with tabs[1]:
     st.subheader("📁 Master Digital Case Repository")
@@ -870,16 +892,16 @@ with tabs[1]:
     for station_name, c_list in st.session_state.cases_db.items():
         for cs in c_list:
             all_dockets.append({
-                "Case No": cs["Case No"],
-                "Title": cs["Title"],
-                "FIR": cs["FIR"],
+                "Case No": cs.get("Case No", "N/A"),
+                "Title": cs.get("Title", "Untitled"),
+                "FIR": cs.get("FIR", "N/A"),
                 "Category": cs.get("Category", "General"),
-                "Location": cs["Location"],
-                "Condition": cs["Condition"],
-                "Verdict / Facility": cs["Punishment"],
+                "Location": cs.get("Location", cs.get("Scene", "N/A")),
+                "Condition": cs.get("Condition", cs.get("Status", "Under Investigation")),
+                "Verdict / Facility": cs.get("Punishment", "Pending Trial"),
                 "Police Station": station_name,
                 "Exhibits Count": len(cs.get("Exhibits", [])),
-                "Investigating Officer": cs["IO"]
+                "Investigating Officer": cs.get("IO", "N/A")
             })
 
     if all_dockets:
@@ -925,11 +947,10 @@ with tabs[2]:
                         "Rank": t_rank.strip(),
                         "Reason": t_reason.strip(),
                         "Checkout Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "Return Deadline": (datetime.now()).strftime("%Y-%m-%d %H:%M:%S"),
+                        "Return Deadline": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         "Status": "CHECKED_OUT"
                     })
 
-                    # Update exhibit custody state
                     for stn_cases in st.session_state.cases_db.values():
                         for c in stn_cases:
                             for ex in c.get("Exhibits", []):
@@ -947,7 +968,7 @@ with tabs[2]:
         st.dataframe(st.session_state.custody_ledger, use_container_width=True)
 
 # ===========================================================================
-# TAB 4: LIVE SHA-256 BIT-LEVEL TAMPER AUDIT & CONTROLLED SIMULATION
+# TAB 4: LIVE SHA-256 BIT-LEVEL TAMPER AUDIT
 # ===========================================================================
 with tabs[3]:
     st.subheader("🔍 SHA-256 Bit-Level Tamper Audit & Verification")
@@ -965,7 +986,6 @@ with tabs[3]:
             log_chained_audit_event("TAMPER_SIMULATION_EXECUTED", "Controlled bit override applied to EV-CCTV-01")
             st.error("Controlled byte override injected into EV-CCTV-01 ciphertext!")
 
-    # Verify all exhibits live
     audit_results = []
     for stn_name, c_list in st.session_state.cases_db.items():
         for cs in c_list:
@@ -1002,7 +1022,7 @@ with tabs[3]:
     st.dataframe(audit_results, use_container_width=True)
 
 # ===========================================================================
-# TAB 5: CRYPTOGRAPHIC AUDIT TRAIL (PORTED DIRECTLY FROM APP.PY)
+# TAB 5: CRYPTOGRAPHIC AUDIT TRAIL
 # ===========================================================================
 with tabs[4]:
     st.subheader("📜 Cryptographically Chained Audit Ledger (MHA Statutory Nonce Chaining)")
@@ -1013,7 +1033,6 @@ with tabs[4]:
 
     st.dataframe(st.session_state.audit_logs, use_container_width=True)
 
-    # Verification of audit chain integrity
     broken_chain = False
     for i in range(1, len(st.session_state.audit_logs)):
         prev = st.session_state.audit_logs[i - 1]
